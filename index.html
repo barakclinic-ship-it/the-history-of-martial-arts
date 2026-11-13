@@ -567,8 +567,9 @@ if (deckChan) deckChan.onmessage = e=>{ if ((e.data||{}).type==='hello') deckSay
 function openRecorder(W){
   W = W || window;                                    // open from the window that was clicked, so the browser allows it
   const url = new URL('recorder.html', location.href).href;
-  let w = null; try{ w = W.open(url, 'kmkrec', 'popup,width=480,height=660'); }catch(_){}
-  if (w) return;
+  if (W._recT && Date.now()-W._recT < 1500) return; W._recT = Date.now();
+  W.open(url, '_blank', 'noopener,noreferrer,popup,width=480,height=660');   // noopener = its own process
+  return;
   // blocked anyway: offer a plain link – clicking a link is always allowed
   const d = W.document; let bar = d.getElementById('recLink');
   if (!bar){ bar = d.createElement('a'); bar.id = 'recLink'; bar.target = 'kmkrec'; bar.rel = 'opener';
@@ -764,6 +765,13 @@ function openNotes(){
   updateNotes(); recUI();
   clearInterval(pvSync); pvSync = setInterval(syncPv, 400);
 }
+function posterize(L){
+  L.querySelectorAll('video').forEach(v=>{
+    const im = document.createElement('img'); im.className='vposter'; im.draggable=false;
+    if (v.poster) im.src = v.poster; im.style.cssText = v.style.cssText; im.style.objectFit = 'cover'; im.style.width = im.style.width || '100%'; im.style.height = im.style.height || '100%';
+    v.removeAttribute('src'); v.load(); v.replaceWith(im);
+  });
+}
 function mirror(host, i, steps){
   host.textContent = '';
   const L = buildLayer(i); L.classList.add('still');
@@ -771,7 +779,7 @@ function mirror(host, i, steps){
   L.querySelectorAll('.tabin').forEach(x=>x.classList.remove('tabin'));
   L.querySelectorAll('iframe').forEach(f=>{ const ph=document.createElement('div'); ph.className='ph'; ph.textContent='תוכן אינטראקטיבי'; f.replaceWith(ph); });
   L.querySelectorAll('.ytfall').forEach(x=>x.remove());
-  L.querySelectorAll('video').forEach(v=>{ v.muted=true; v.controls=false; v.preload='auto'; });
+  posterize(L);
   L.querySelectorAll('[data-stop],.el').forEach(x=>x.style.pointerEvents='none');
   host.appendChild(L);
   return L;
@@ -815,29 +823,23 @@ function syncPv(){
   const d = pv.document, sec = Math.floor((Date.now()-t0)/1000);
   d.getElementById('el').innerHTML = `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}<small>זמן שיעור</small>`;
   const now = new Date(); d.getElementById('wall').innerHTML = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}<small>שעה</small>`;
-  if (pv._now && layer) pv._now.querySelectorAll('.el[data-id]').forEach(el=>{
-    const pvV = el.querySelector('video'); if (!pvV) return;
-    const mv = layer.querySelector(`.el[data-id="${el.dataset.id}"] video`); if (!mv) return;
-    if (!mv.paused){ if (Math.abs(pvV.currentTime-mv.currentTime)>0.5) pvV.currentTime = mv.currentTime; if (pvV.paused) pvV.play().catch(()=>{}); }
-    else if (!pvV.paused) pvV.pause();
-  });
 }
 
 /* ---------- grid ---------- */
 let gridBuilt = false;
 function toggleGrid(){
   const g = document.getElementById('grid');
-  if (g.classList.contains('on')){ g.classList.remove('on'); return; }
+  if (g.classList.contains('on')){ g.classList.remove('on'); g.querySelector('.wrap').textContent=''; gridBuilt=false; return; }
   const wrap = g.querySelector('.wrap');
   if (!gridBuilt){
     visible.forEach((i, vi)=>{
       const th = document.createElement('div'); th.className='th'; th.dataset.i=i;
       const mini = buildLayer(i); mini.className='mini';
-      mini.querySelectorAll('video').forEach(v=>v.preload='none');
+      posterize(mini);
       mini.querySelectorAll('iframe').forEach(f=>f.remove());
       mini.querySelectorAll('.hid').forEach(x=>x.classList.remove('hid'));
       th.appendChild(mini); const sp=document.createElement('span'); sp.textContent=vi+1; th.appendChild(sp);
-      th.onclick = ()=>{ g.classList.remove('on'); show(i,{animate:false}); };
+      th.onclick = ()=>{ g.classList.remove('on'); g.querySelector('.wrap').textContent=''; gridBuilt=false; show(i,{animate:false}); };
       wrap.appendChild(th);
     });
     gridBuilt = true;
