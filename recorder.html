@@ -34,13 +34,15 @@ ol{margin:6px 0 0;padding-inline-start:20px}
     <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
   <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
   <div class="row"><div id="time">0:00</div><div style="flex:1"><div class="lbl">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
+  <div class="row"><span class="lbl">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select></div>
+  <div id="micMsg" class="lbl" style="min-height:20px"></div>
   <div class="row"><span class="lbl">פורמט:</span>
     <select id="fmt"><option value="webm">WebM – יציב (מומלץ)</option><option value="mp4">MP4 – ניסיוני, עלול לקרוס</option></select></div>
   <div id="msg" role="status"></div>
   <div class="box"><b>איך מקליטים</b><ol>
+    <li>מדברים ובודקים שהפס הירוק של המיקרופון זז. אם לא – בוחרים מיקרופון אחר מהרשימה.</li>
     <li>לוחצים "התחל הקלטה".</li>
     <li>בחלון של כרום בוחרים <b>"כל המסך" (Entire screen)</b> ← המסך שמוצגת עליו המצגת לסטודנטים, ומסמנים <b>"שתף גם אודיו מערכת"</b> כדי שקול הסרטונים ייכנס.<br><span class="lbl">לא לבחור "כרטיסייה" – זה מפיל את המצגת.</span></li>
-    <li>מאשרים מיקרופון.</li>
     <li>בסוף – "עצור ושמור". הקובץ יורד לתיקיית ההורדות, יחד עם קובץ פרקים לפי שקופיות.</li>
   </ol><div class="lbl" style="margin-top:6px">ההקלטה נכתבת לדיסק כל כמה שניות, כך שגם אם משהו קורס – מה שהוקלט נשמר ואפשר לשחזר אותו כאן.</div></div>
 </main>
@@ -86,6 +88,37 @@ async function saveMeta(){
   await w.write(JSON.stringify({mime:S.mime, t0:S.t0, dur:(Date.now()-S.t0)/1000, parts:S.parts, marks:S.marks})); await w.close();
 }
 
+/* ---------- microphone: chosen and tested before recording ---------- */
+const MIC = {stream:null, ctx:null, an:null, raf:0, quiet:0};
+async function openMic(){
+  const id = $('micSel').value;
+  if (MIC.stream) MIC.stream.getTracks().forEach(t=>t.stop());
+  try{
+    MIC.stream = await navigator.mediaDevices.getUserMedia({audio:{deviceId: id ? {exact:id} : undefined, echoCancellation:false, noiseSuppression:true, autoGainControl:true}});
+  }catch(e){ MIC.stream = null; $('micMsg').textContent = 'אין גישה למיקרופון – לחץ על סמל המנעול ליד הכתובת ואפשר מיקרופון, ואז רענן.'; return; }
+  try{ localStorage.setItem('kmk-mic', id); }catch(_){}
+  await listMics();
+  if (!MIC.ctx) MIC.ctx = new AudioContext();
+  if (MIC.ctx.state==='suspended') try{ await MIC.ctx.resume(); }catch(_){}
+  MIC.an = MIC.ctx.createAnalyser(); MIC.an.fftSize = 512; MIC.ctx.createMediaStreamSource(MIC.stream).connect(MIC.an);
+  const buf = new Uint8Array(512); MIC.quiet = 0; cancelAnimationFrame(MIC.raf);
+  const loop = ()=>{ MIC.an.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk,Math.abs(v-128));
+    $('lvl').style.width = Math.min(100,pk/60*100)+'%';
+    MIC.quiet = pk < 3 ? MIC.quiet+1 : 0;
+    $('micMsg').textContent = MIC.quiet > 300 ? 'לא נשמע כלום מהמיקרופון הזה – דבר, ואם הפס לא זז בחר מיקרופון אחר.' : '';
+    MIC.raf = requestAnimationFrame(loop); };
+  loop();
+}
+async function listMics(){
+  let devs = []; try{ devs = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'); }catch(_){}
+  const sel = $('micSel'), cur = (MIC.stream && MIC.stream.getAudioTracks()[0].getSettings().deviceId) || sel.value;
+  sel.innerHTML = devs.map(d=>`<option value="${d.deviceId}">${(d.label||'מיקרופון').replace(/</g,'')}</option>`).join('') || '<option value="">ברירת המחדל</option>';
+  if (devs.some(d=>d.deviceId===cur)) sel.value = cur;
+}
+$('micSel').onchange = ()=>{ if (!S) openMic(); };
+(async()=>{ try{ const saved = localStorage.getItem('kmk-mic'); if (saved){ $('micSel').innerHTML = `<option value="${saved}"></option>`; $('micSel').value = saved; } }catch(_){}
+  await openMic(); })();
+
 /* ---------- start / stop ---------- */
 async function start(){
   $('msg').textContent = '';
@@ -95,8 +128,9 @@ async function start(){
     display = await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor', frameRate:{ideal:30,max:30}, width:{max:1920}, height:{max:1080}},
       audio:{suppressLocalAudioPlayback:false}, selfBrowserSurface:'exclude', surfaceSwitching:'exclude', monitorTypeSurfaces:'include', systemAudio:'include', preferCurrentTab:false});
   }catch(e){ return; }
-  try{ mic = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
-  catch(e){ $('msg').textContent = 'אין גישה למיקרופון – מקליט בלי קול המרצה.'; }
+  if (!MIC.stream) await openMic();
+  mic = MIC.stream;
+  if (!mic) $('msg').textContent = 'אין גישה למיקרופון – מקליט בלי קול המרצה.';
   const ctx = new AudioContext(), dest = ctx.createMediaStreamDestination();
   const surf = (display.getVideoTracks()[0].getSettings()||{}).displaySurface;
   if (surf==='browser'){ display.getTracks().forEach(t=>t.stop()); if (mic) mic.getTracks().forEach(t=>t.stop());
@@ -104,7 +138,8 @@ async function start(){
   const da = display.getAudioTracks();
   if (da.length){ const g = ctx.createGain(); g.gain.value = .8; ctx.createMediaStreamSource(new MediaStream(da)).connect(g).connect(dest); }
   let an = null;
-  if (mic){ const src = ctx.createMediaStreamSource(mic); src.connect(dest); an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an); }
+  try{ await ctx.resume(); }catch(_){}
+  if (mic){ const src = ctx.createMediaStreamSource(mic), g = ctx.createGain(); g.gain.value = 1.4; src.connect(g).connect(dest); }
   const out = new MediaStream([...display.getVideoTracks(), ...((da.length||mic) ? dest.stream.getAudioTracks() : [])]);
   const mime = pickMime($('fmt').value);
   let mr;
@@ -129,7 +164,7 @@ function stop(){ if (!S || S.stopping) return; S.stopping = true; try{ S.mr.stat
 async function finish(){
   const s = S; if (!s || s.done) return; s.done = true;
   clearInterval(s.tick);
-  [s.display, s.mic].forEach(st => st && st.getTracks().forEach(t=>t.stop()));
+  if (s.display) s.display.getTracks().forEach(t=>t.stop());   // the mic stays open for the next recording
   try{ s.ctx.close(); }catch(_){}
   $('goT').textContent = 'שומר…'; $('go').disabled = true;
   await s.q; if (s.w){ try{ await s.w.close(); }catch(_){} s.w = null; }
