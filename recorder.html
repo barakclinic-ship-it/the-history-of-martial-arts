@@ -34,7 +34,7 @@ ol{margin:6px 0 0;padding-inline-start:20px}
     <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
   <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
   <div class="row"><div id="time">0:00</div><div style="flex:1"><div class="lbl">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
-  <div class="row"><span class="lbl">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select></div>
+  <div class="row"><span class="lbl">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select><button class="sm" id="micNext" hidden title="עבור למיקרופון הבא ברשימה">הבא</button></div>
   <div id="micMsg" class="lbl" style="min-height:20px"></div>
   <div class="row"><span class="lbl">פורמט:</span>
     <select id="fmt"><option value="webm">WebM – יציב (מומלץ)</option><option value="mp4">MP4 – ניסיוני, עלול לקרוס</option></select></div>
@@ -112,10 +112,18 @@ async function openMic(){
 async function listMics(){
   let devs = []; try{ devs = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'); }catch(_){}
   const sel = $('micSel'), cur = (MIC.stream && MIC.stream.getAudioTracks()[0].getSettings().deviceId) || sel.value;
-  sel.innerHTML = devs.map(d=>`<option value="${d.deviceId}">${(d.label||'מיקרופון').replace(/</g,'')}</option>`).join('') || '<option value="">ברירת המחדל</option>';
+  const VIRT = /transcreen|virtual|cable|stereo mix|vb-audio|voicemeeter|loopback|blackhole|soundflower|obs|screen audio/i;
+  devs = devs.filter(d=>d.deviceId!=='communications');
+  devs.sort((a,b)=>VIRT.test(a.label)-VIRT.test(b.label));
+  sel.innerHTML = devs.map(d=>`<option value="${d.deviceId}">${(d.label||'מיקרופון').replace(/</g,'')}${VIRT.test(d.label)?' – מכשיר וירטואלי, לא מיקרופון':''}</option>`).join('') || '<option value="">ברירת המחדל</option>';
   if (devs.some(d=>d.deviceId===cur)) sel.value = cur;
+  let chosen = null; try{ chosen = localStorage.getItem('kmk-mic-chosen'); }catch(_){}
+  const curDev = devs.find(d=>d.deviceId===sel.value);
+  if (!chosen && curDev && VIRT.test(curDev.label) && devs[0] && !VIRT.test(devs[0].label) && !listMics.switched){ listMics.switched = true; sel.value = devs[0].deviceId; setTimeout(openMic, 0); }
+  $('micNext').hidden = devs.length < 2;
 }
-$('micSel').onchange = ()=>{ if (!S) openMic(); };
+$('micSel').onchange = ()=>{ try{ localStorage.setItem('kmk-mic-chosen','1'); }catch(_){} if (!S) openMic(); };
+$('micNext').onclick = ()=>{ const sel = $('micSel'); sel.selectedIndex = (sel.selectedIndex+1) % sel.options.length; sel.onchange(); };
 addEventListener('pointerdown', ()=>{ if (MIC.ctx && MIC.ctx.state==='suspended') MIC.ctx.resume().then(()=>{ if ($('micMsg').textContent.startsWith('לחץ')) $('micMsg').textContent=''; }).catch(()=>{}); if (!MIC.stream && !S) openMic(); }, true);
 const withTimeout = (p, ms) => Promise.race([p, new Promise(r=>setTimeout(()=>r(null), ms))]);
 (async()=>{ try{ const saved = localStorage.getItem('kmk-mic'); if (saved){ $('micSel').innerHTML = `<option value="${saved}"></option>`; $('micSel').value = saved; } }catch(_){}
