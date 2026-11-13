@@ -262,12 +262,14 @@ function renderFrame(e, div){
 function isTab(e){ return e.y>=128 && e.y+e.h<=215 && e.w<460 && e.x>1000 && e.type!=='pic'; }
 function textOf(e){ return e.text ? e.text.paras.map(p=>p.runs.map(r=>r.t||'').join('')).join(' ').trim() : ''; }
 function tabKey(e){ return Math.round(e.x/8)+'|'+(e.fill||'')+'|'+textOf(e); }
+function tabGroup(e){ return 'g'+Math.round((e.x+e.w/2)/60); }             // pieces of one tag share a centre
+function tabSigs(els){ const m = {}; els.filter(isTab).forEach(e=>{ const g=tabGroup(e); (m[g]=m[g]||[]).push(tabKey(e)); }); for (const g in m) m[g]=m[g].sort().join('§'); return m; }
 function renderEl(e){
   const div = document.createElement('div');
   div.className = 'el'; div.dataset.name = e.name; div.dataset.id = e.id;
   applyBox(div, e);
   if (e.hid) div.classList.add('hid');
-  if (isTab(e)){ div.classList.add('tabin'); div.style.setProperty('--td', (0.18 + Math.max(0,(SW-e.x-e.w))/900).toFixed(2)+'s'); div.dataset.tab = tabKey(e); }
+  if (isTab(e)){ div.classList.add('tabin'); div.dataset.tg = tabGroup(e); }
   if (e.type==='frame'){ renderFrame(e, div); return div; }
   if (e.type==='pic'){ renderPic(e, div); }
   else {
@@ -453,7 +455,13 @@ function show(j, opts={}){
     L = buildLayer(j);
     const prevS = cur!=null ? slides[cur] : null;
     // tabs that look the same as on the previous slide stay put
-    if (prevS){ const keep = new Set(prevS.els.filter(isTab).map(tabKey)); L.querySelectorAll('.el.tabin').forEach(d=>{ if (keep.has(d.dataset.tab)) d.classList.remove('tabin'); }); }
+    { const before = prevS ? tabSigs(prevS.els) : {}, now = tabSigs(s.els);
+      const groups = Object.keys(now).sort((a,b)=>b.slice(1)-a.slice(1));       // right-most tag first
+      L.querySelectorAll('.el.tabin').forEach(d=>{
+        const g = d.dataset.tg;
+        if (before[g] === now[g]) d.classList.remove('tabin');
+        else d.style.setProperty('--td', (0.18 + groups.indexOf(g)*0.12).toFixed(2)+'s');
+      }); }
     if (!(layer && animate)) L.querySelectorAll('.el.tabin').forEach(d=>d.classList.remove('tabin'));
     stage.appendChild(L);
     const zoom = (layer && animate) ? hubZoom(prevS, s) : null;
@@ -550,7 +558,7 @@ function recUI(){
   const d = W.document, b = d.getElementById('recB'), t = d.getElementById('recT'), m = d.getElementById('mic');
   if (!b) return;
   b.classList.toggle('on', rec.active); b.textContent = rec.active ? 'עצור ושמור' : 'הקלט שיעור';
-  t.textContent = rec.active ? fmtT((Date.now()-rec.t0)/1000) : ''; m.hidden = !(rec.active && rec.analyser);
+  t.textContent = rec.active ? fmtT((Date.now()-rec.t0)/1000) : ''; m.hidden = false; m.classList.toggle('off', !(rec.active && rec.analyser));
 }
 async function startRec(W){
   if (rec.active) return;
@@ -619,10 +627,13 @@ function openNotes(){
   pv.document.open();
   pv.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><base href="${location.href.split('#')[0]}"><title>מסך מרצה · ${document.title}</title><style>${css}
   html,body{overflow:hidden;background:#101010}
-  body{margin:0;color:#eee;font:16px/1.5 Arial,"Liberation Sans",sans-serif;display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh}
-  header{display:flex;align-items:center;gap:18px;padding:10px 18px;background:#000;border-bottom:1px solid #222}
-  header .sn{font-size:22px;font-weight:700} header .sn em{font-style:normal;color:#ff4b52}
-  header .sp{flex:1}
+  body{margin:0;color:#eee;font:16px/1.5 Arial,"Liberation Sans",sans-serif;display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:minmax(0,1fr);height:100vh}
+  header{min-width:0;max-width:100vw;overflow:hidden;display:flex;align-items:center;gap:14px;height:64px;box-sizing:border-box;padding:0 18px;background:#000;border-bottom:1px solid #222;flex-wrap:nowrap;white-space:nowrap}
+  header .sn{font-size:22px;font-weight:700;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis} header .sn em{font-style:normal;color:#ff4b52}
+  header .sp{display:none}
+  header > *{flex-shrink:0} header .sn{flex-shrink:1}
+  #el,#wall{min-width:64px;text-align:center} #recB{min-width:118px} #recT{display:inline-block;min-width:56px}
+  #mic.off{visibility:hidden}
   .clock{font-variant-numeric:tabular-nums;font-size:22px} .clock small{display:block;font-size:12px;opacity:.6;text-align:center}
   header button,.tools button{background:#262626;color:#eee;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
   header button:hover,.tools button:hover{background:#383838}
@@ -653,7 +664,7 @@ function openNotes(){
   </style></head><body>
   <header><div class="sn" id="sn"></div><div class="sp"></div>
     <div class="clock" id="el"></div><button id="rst" title="איפוס טיימר">⟲</button><div class="clock" id="wall"></div>
-    <div id="rec"><button id="recB" title="הקלטת השיעור: מסך + קול המרצה + קול הסרטונים">הקלט שיעור</button><span id="recT"></span><div id="mic" hidden><i></i></div></div>
+    <div id="rec"><button id="recB" title="הקלטת השיעור: מסך + קול המרצה + קול הסרטונים">הקלט שיעור</button><span id="recT"></span><div id="mic" class="off"><i></i></div></div>
     <button id="p" title="הקודם (→)">→ הקודם</button><button id="h" title="לתחילת המצגת">⏮</button><button id="n" title="הבא (←)">הבא ←</button></header>
   <div id="wrap">
     <section id="notesP"><div class="tools"><b>הערות</b><button id="am">א−</button><button id="ap">א+</button><button id="orig" hidden>החזר להערה המקורית</button><button id="exp">ייצוא כל ההערות</button><span class="st" id="st"></span></div>
