@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הרכב אמנויות הלחימה</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Heebo',sans-serif;background:#f7f6f2;color:#1a1a1a;direction:rtl;height:100vh;display:flex;flex-direction:column;padding:14px 18px;gap:10px}
+.topbar{display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+h1{font-size:2rem;font-weight:700;color:#111}
+.add-btn{font-size:17px;padding:8px 18px;border:1px solid #ccc;border-radius:8px;cursor:pointer;background:#fff;color:#555;font-family:'Heebo',sans-serif;transition:all 0.15s}
+.add-btn:hover{background:#f0f0ee;border-color:#888;color:#111}
+.legend{display:flex;gap:28px;font-size:19px;color:#555;align-items:center;flex-shrink:0;justify-content:center}
+.legend span{display:flex;align-items:center;gap:6px}
+.sw{width:18px;height:18px;border-radius:3px;flex-shrink:0}
+.chart-panel{flex:1;background:#fff;border-radius:14px;border:1px solid #e8e8e4;padding:16px 16px 10px;display:flex;flex-direction:column;min-height:0}
+.chart-area{flex:1;position:relative;min-height:0}
+.chart-area canvas{cursor:grab;touch-action:none}
+.chart-area canvas.dragging-cursor{cursor:grabbing}
+.click-hint{font-size:14px;color:#aaa;text-align:center;margin-top:4px;flex-shrink:0}
+
+/* drag ghost */
+#drag-ghost{position:fixed;pointer-events:none;background:#5B8FF9;color:#fff;font-size:12px;font-family:'Heebo',sans-serif;padding:4px 10px;border-radius:6px;opacity:0.85;display:none;z-index:999;white-space:nowrap}
+
+/* popup */
+.popup{position:fixed;background:#fff;border:1px solid #e0e0da;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.12);padding:16px 18px;width:260px;z-index:100;display:none;direction:rtl}
+.popup.open{display:block}
+.popup-name{font-size:17px;font-weight:700;color:#111;margin-bottom:10px;border:none;outline:none;width:100%;background:transparent;font-family:'Heebo',sans-serif;border-bottom:1px solid #eee;padding-bottom:6px}
+.popup-name::placeholder{color:#bbb;font-weight:400}
+.popup-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.popup-row label{font-size:16px;font-weight:600}
+.pct-wrap{position:relative;display:inline-flex;align-items:center}
+.pct-wrap input{width:72px;font-size:17px;padding:4px 14px 4px 4px;border:1px solid #e0e0da;border-radius:6px;background:#fafaf8;color:#111;text-align:center;outline:none;appearance:none;-moz-appearance:textfield;font-family:'Heebo',sans-serif}
+.pct-wrap input:focus{border-color:#999}
+.pct-wrap::after{content:'%';position:absolute;left:5px;font-size:10px;color:#bbb;pointer-events:none}
+.popup-footer{display:flex;justify-content:space-between;margin-top:10px;padding-top:8px;border-top:1px solid #f0f0ee}
+.popup-del{font-size:11px;color:#e24b4a;cursor:pointer;border:none;background:none;font-family:'Heebo',sans-serif;padding:0}
+.popup-del:hover{text-decoration:underline}
+.popup-close{font-size:11px;color:#999;cursor:pointer;border:none;background:none;font-family:'Heebo',sans-serif;padding:0}
+.popup-close:hover{color:#333}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>הרכב אמנויות הלחימה</h1>
+  <button class="add-btn" onclick="addArt()">+ הוסף אמנות</button>
+</div>
+
+<div class="legend" id="legend"></div>
+
+<div class="chart-panel">
+  <div class="chart-area"><canvas id="chart"></canvas></div>
+  <div class="click-hint">גרירה — הזזת עמודה · לחיצה — עריכה</div>
+</div>
+
+<div id="drag-ghost"></div>
+
+<div class="popup" id="popup">
+  <input class="popup-name" type="text" id="popup-name" placeholder="שם אמנות לחימה">
+  <div id="popup-inputs"></div>
+  <div class="popup-footer">
+    <button class="popup-del" onclick="delCurrent()">מחק אמנות</button>
+    <button class="popup-close" onclick="closePopup()">סגור</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var urls=[
+    'chart.umd.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'
+  ];
+  var i=0;
+  function tryLoad(){
+    if(i>=urls.length)return;
+    var s=document.createElement('script');s.src=urls[i++];
+    s.onload=function(){if(typeof Chart!=='undefined')init();};
+    s.onerror=tryLoad;
+    document.head.appendChild(s);
+  }
+  tryLoad();
+})();
+</script>
+<script>
+const CATS=[
+  {name:'הישרדות',    color:'#5B8FF9'},
+  {name:'ספורט הישגי',color:'#F4664A'},
+  {name:'ווללביינג',  color:'#5AD8A6'}
+];
+
+let arts=[
+  {name:'קרב מגע צבאי',   vals:[90, 0,10]},
+  {name:"ג'ודו ספורטיבי", vals:[ 7,83,10]},
+  {name:"צ'י גונג",       vals:[10, 0,90]},
+  {name:'קראטה מסורתי',   vals:[50, 0,50]},
+];
+
+let currentAi=null;
+let chartInst=null;
+
+// drag state
+let dragAi=null;
+let dragOverAi=null;
+
+function adjustToHundred(vals,ci,nv){
+  nv=Math.max(0,Math.min(100,Math.round(nv)));
+  const rest=100-nv,oi=[0,1,2].filter(i=>i!==ci),os=oi.reduce((s,i)=>s+vals[i],0),r=[...vals];
+  r[ci]=nv;
+  if(os===0){const e=Math.floor(rest/oi.length);oi.forEach(i=>r[i]=e);r[oi[oi.length-1]]+=rest-e*oi.length;}
+  else{let a=0;oi.forEach((i,j)=>{if(j===oi.length-1){r[i]=rest-a;}else{const v=Math.round(vals[i]/os*rest);r[i]=v;a+=v;}});}
+  r.forEach((v,i)=>{if(v<0)r[i]=0;});
+  return r;
+}
+
+function getBarIndexAtX(clientX){
+  if(!chartInst) return null;
+  const canvas=document.getElementById('chart');
+  const rect=canvas.getBoundingClientRect();
+  const x=clientX-rect.left;
+  const meta=chartInst.getDatasetMeta(0);
+  let closest=null, minDist=Infinity;
+  meta.data.forEach((bar,i)=>{
+    const {x:bx,width}=bar.getProps(['x','width'],true);
+    const dist=Math.abs(bx-x);
+    if(dist<width/2+10 && dist<minDist){minDist=dist;closest=i;}
+  });
+  return closest;
+}
+
+function renderChart(){
+  const labels=arts.map(a=>a.name);
+  const datasets=CATS.map((c,ci)=>({
+    label:c.name,
+    data:arts.map(a=>a.vals[ci]),
+    backgroundColor:arts.map((_,i)=> i===dragOverAi ? c.color+'99' : c.color),
+    borderRadius:4,
+    borderSkipped:false
+  }));
+
+  if(chartInst)chartInst.destroy();
+  chartInst=new Chart(document.getElementById('chart'),{
+    type:'bar',
+    data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{enabled:false}},
+      scales:{
+        x:{stacked:true,grid:{display:false},ticks:{color:'#333',font:{size:20,weight:'600',family:'Heebo,sans-serif'},autoSkip:false},reverse:true},
+        y:{stacked:true,max:100,ticks:{color:'#999',font:{size:15},callback:v=>v+'%',stepSize:25},grid:{color:'rgba(0,0,0,0.05)'},border:{dash:[3,3]}}
+      }
+    },
+    plugins:[{
+      id:'bar-labels',
+      afterDatasetsDraw(chart){
+        const ctx=chart.ctx;
+        chart.data.datasets.forEach((ds,di)=>{
+          const meta=chart.getDatasetMeta(di);
+          meta.data.forEach((bar,i)=>{
+            const val=ds.data[i];if(val<8)return;
+            const{x,y,width,height}=bar.getProps(['x','y','width','height'],true);
+            ctx.save();
+            ctx.fillStyle='rgba(255,255,255,0.95)';
+            ctx.font='bold 20px Heebo,sans-serif';
+            ctx.textAlign='center';ctx.textBaseline='middle';
+            ctx.fillText(Math.round(val)+'%',x,y+height/2);
+            ctx.restore();
+          });
+        });
+      }
+    }]
+  });
+
+  // attach mouse events for drag & right-click
+  attachCanvasEvents();
+}
+
+function attachCanvasEvents(){
+  const canvas=document.getElementById('chart');
+
+  canvas.oncontextmenu=e=>{
+    e.preventDefault();
+    const ai=getBarIndexAtX(e.clientX);
+    if(ai!==null) openPopup(ai,e);
+  };
+
+  // pointer events: works with mouse, touch and pen.
+  // short tap/click = edit, drag past a few pixels = move the column
+  let downX=0,downY=0,downAi=null,moved=false;
+  canvas.onpointerdown=e=>{
+    if(e.button!==0) return;
+    const ai=getBarIndexAtX(e.clientX);
+    if(ai===null) return;
+    downAi=ai;downX=e.clientX;downY=e.clientY;moved=false;
+    try{canvas.setPointerCapture(e.pointerId);}catch(_){}
+  };
+  canvas.onpointermove=e=>{
+    if(downAi===null) return;
+    if(!moved && Math.hypot(e.clientX-downX,e.clientY-downY)<8) return;
+    const ghost=document.getElementById('drag-ghost');
+    if(!moved){
+      moved=true;dragAi=downAi;
+      canvas.classList.add('dragging-cursor');
+      ghost.textContent=arts[dragAi].name;ghost.style.display='block';
+    }
+    ghost.style.left=(e.clientX+12)+'px';
+    ghost.style.top=(e.clientY-16)+'px';
+    const ai=getBarIndexAtX(e.clientX);
+    if(ai!==null && ai!==dragAi && ai!==dragOverAi){
+      dragOverAi=ai;
+      chartInst.data.datasets.forEach((ds,di)=>{
+        ds.backgroundColor=arts.map((_,i)=> i===dragOverAi ? CATS[di].color+'66' : CATS[di].color);
+      });
+      chartInst.update('none');
+    }
+  };
+  const finish=e=>{
+    if(downAi===null) return;
+    const ai0=downAi;downAi=null;
+    if(!moved){openPopup(ai0,e);return;}
+    document.getElementById('drag-ghost').style.display='none';
+    canvas.classList.remove('dragging-cursor');
+    const toAi=getBarIndexAtX(e.clientX);
+    if(toAi!==null && toAi!==dragAi){
+      const m=arts.splice(dragAi,1)[0];
+      arts.splice(toAi,0,m);
+    }
+    dragAi=null;dragOverAi=null;moved=false;
+    renderChart();
+  };
+  canvas.onpointerup=finish;
+  canvas.onpointercancel=e=>{downAi=null;moved=false;dragAi=null;dragOverAi=null;document.getElementById('drag-ghost').style.display='none';renderChart();};
+}
+
+function openPopup(ai,e){
+  currentAi=ai;
+  const art=arts[ai];
+  document.getElementById('popup-name').value=art.name;
+  const inpArea=document.getElementById('popup-inputs');
+  inpArea.innerHTML='';
+  CATS.forEach((c,ci)=>{
+    const row=document.createElement('div');row.className='popup-row';
+    const lbl=document.createElement('label');lbl.textContent=c.name;lbl.style.color=c.color;
+    const wrap=document.createElement('div');wrap.className='pct-wrap';
+    const inp=document.createElement('input');
+    inp.type='number';inp.min=0;inp.max=100;inp.step=1;inp.value=art.vals[ci];
+    inp.id='pop-inp-'+ci;
+    inp.onchange=()=>{
+      arts[currentAi].vals=adjustToHundred(arts[currentAi].vals,ci,parseFloat(inp.value)||0);
+      CATS.forEach((_,i)=>{const el=document.getElementById('pop-inp-'+i);if(el&&i!==ci)el.value=arts[currentAi].vals[i];});
+      CATS.forEach((_,i)=>{chartInst.data.datasets[i].data[currentAi]=arts[currentAi].vals[i];});
+      chartInst.update('none');
+    };
+    wrap.appendChild(inp);row.appendChild(lbl);row.appendChild(wrap);inpArea.appendChild(row);
+  });
+  const popup=document.getElementById('popup');
+  let px=e.clientX-130, py=e.clientY-20;
+  px=Math.max(8,Math.min(px,window.innerWidth-270));
+  py=Math.max(8,Math.min(py,window.innerHeight-300));
+  popup.style.left=px+'px';popup.style.top=py+'px';
+  popup.classList.add('open');
+  const nameInp=document.getElementById('popup-name');
+  nameInp.oninput=()=>{arts[currentAi].name=nameInp.value;};
+  nameInp.onblur=()=>{chartInst.data.labels[currentAi]=arts[currentAi].name;chartInst.update('none');};
+}
+
+function closePopup(){
+  document.getElementById('popup').classList.remove('open');
+  currentAi=null;
+}
+
+function delCurrent(){
+  if(currentAi===null||arts.length<=1)return;
+  arts.splice(currentAi,1);
+  closePopup();
+  renderChart();
+}
+
+function addArt(){
+  arts.push({name:'אמנות '+(arts.length+1),vals:[33,34,33]});
+  renderChart();
+  setTimeout(()=>{
+    const fakeE={clientX:window.innerWidth/2,clientY:200};
+    openPopup(arts.length-1,fakeE);
+    document.getElementById('popup-name').select();
+  },100);
+}
+
+function renderLegend(){
+  document.getElementById('legend').innerHTML=CATS.map(c=>
+    `<span><span class="sw" style="background:${c.color}"></span>${c.name}</span>`
+  ).join('');
+}
+
+document.addEventListener('click',e=>{
+  const popup=document.getElementById('popup');
+  if(popup.classList.contains('open')&&!popup.contains(e.target)&&e.target.id!=='chart') closePopup();
+});
+
+function init(){renderLegend();renderChart();}
+</script>
+</body>
+</html>
