@@ -99,7 +99,7 @@ async function openMic(){
   try{ localStorage.setItem('kmk-mic', id); }catch(_){}
   await listMics();
   if (!MIC.ctx) MIC.ctx = new AudioContext();
-  if (MIC.ctx.state==='suspended') try{ await MIC.ctx.resume(); }catch(_){}
+  if (MIC.ctx.state==='suspended'){ MIC.ctx.resume().catch(()=>{}); if (MIC.ctx.state==='suspended') $('micMsg').textContent = 'לחץ בכל מקום בחלון כדי להפעיל את מד המיקרופון.'; }
   MIC.an = MIC.ctx.createAnalyser(); MIC.an.fftSize = 512; MIC.ctx.createMediaStreamSource(MIC.stream).connect(MIC.an);
   const buf = new Uint8Array(512); MIC.quiet = 0; cancelAnimationFrame(MIC.raf);
   const loop = ()=>{ MIC.an.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk,Math.abs(v-128));
@@ -116,37 +116,46 @@ async function listMics(){
   if (devs.some(d=>d.deviceId===cur)) sel.value = cur;
 }
 $('micSel').onchange = ()=>{ if (!S) openMic(); };
+addEventListener('pointerdown', ()=>{ if (MIC.ctx && MIC.ctx.state==='suspended') MIC.ctx.resume().then(()=>{ if ($('micMsg').textContent.startsWith('לחץ')) $('micMsg').textContent=''; }).catch(()=>{}); if (!MIC.stream && !S) openMic(); }, true);
+const withTimeout = (p, ms) => Promise.race([p, new Promise(r=>setTimeout(()=>r(null), ms))]);
 (async()=>{ try{ const saved = localStorage.getItem('kmk-mic'); if (saved){ $('micSel').innerHTML = `<option value="${saved}"></option>`; $('micSel').value = saved; } }catch(_){}
   await openMic(); })();
 
 /* ---------- start / stop ---------- */
 async function start(){
+  if (start.busy) return; start.busy = true;
+  try{ await start2(); }
+  catch(e){ $('msg').textContent = 'ההקלטה לא התחילה: ' + (e && e.message || e); if (S && S.display) S.display.getTracks().forEach(t=>t.stop()); S = null; }
+  finally{ start.busy = false; }
+}
+async function start2(){
   $('msg').textContent = '';
+  const ctx = new AudioContext(); ctx.resume().catch(()=>{});      // created during the click, so it is allowed to run
+  if (MIC.ctx) MIC.ctx.resume().catch(()=>{});
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder){ $('msg').textContent = 'הדפדפן לא תומך בהקלטה – השתמש בכרום או אדג׳.'; return; }
   let display, mic = null;
   try{
     display = await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor', frameRate:{ideal:30,max:30}, width:{max:1920}, height:{max:1080}},
       audio:{suppressLocalAudioPlayback:false}, selfBrowserSurface:'exclude', surfaceSwitching:'exclude', monitorTypeSurfaces:'include', systemAudio:'include', preferCurrentTab:false});
-  }catch(e){ return; }
-  if (!MIC.stream) await openMic();
+  }catch(e){ ctx.close(); return; }
+  if (!MIC.stream) await withTimeout(openMic(), 8000);
   mic = MIC.stream;
   if (!mic) $('msg').textContent = 'אין גישה למיקרופון – מקליט בלי קול המרצה.';
-  const ctx = new AudioContext(), dest = ctx.createMediaStreamDestination();
+  const dest = ctx.createMediaStreamDestination();
   const surf = (display.getVideoTracks()[0].getSettings()||{}).displaySurface;
-  if (surf==='browser'){ display.getTracks().forEach(t=>t.stop()); if (mic) mic.getTracks().forEach(t=>t.stop());
+  if (surf==='browser'){ display.getTracks().forEach(t=>t.stop()); ctx.close();
     $('msg').textContent = 'נבחרה כרטיסייה – זה מפיל את המצגת. לחץ שוב ובחר "כל המסך".'; return; }
   const da = display.getAudioTracks();
   if (da.length){ const g = ctx.createGain(); g.gain.value = .8; ctx.createMediaStreamSource(new MediaStream(da)).connect(g).connect(dest); }
   let an = null;
-  try{ await ctx.resume(); }catch(_){}
   if (mic){ const src = ctx.createMediaStreamSource(mic), g = ctx.createGain(); g.gain.value = 1.4; src.connect(g).connect(dest); }
   const out = new MediaStream([...display.getVideoTracks(), ...((da.length||mic) ? dest.stream.getAudioTracks() : [])]);
   const mime = pickMime($('fmt').value);
   let mr;
   try{ mr = new MediaRecorder(out, mime ? {mimeType:mime, videoBitsPerSecond:2500000, audioBitsPerSecond:128000} : {}); }
   catch(e){ mr = new MediaRecorder(out); }
-  const root = await opfs(); let dir = null;
-  if (root){ try{ dir = await root.getDirectoryHandle('rec_' + Date.now(), {create:true}); }catch(_){ dir = null; } }
+  const root = await withTimeout(opfs(), 3000); let dir = null;
+  if (root){ try{ dir = await withTimeout(root.getDirectoryHandle('rec_' + Date.now(), {create:true}), 3000); }catch(_){ dir = null; } }
   S = {display, mic, ctx, an, mr, mime: mr.mimeType || mime, t0: Date.now(), partT: Date.now(), marks: [], parts: [], dir, w:null, q:Promise.resolve(), mem:[]};
   if (curSlide) S.marks.push({t:0, vi:curSlide.vi, title:curSlide.title});
   if (chan) chan.postMessage({type:'hello'});
