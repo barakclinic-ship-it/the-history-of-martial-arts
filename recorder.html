@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הקלטת שיעור</title>
+<style>
+:root{--bg:#111;--panel:#1c1c1c;--fg:#f1f1f1;--mut:#9a9a9a;--red:#c4161c;--ok:#4caf50}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.5 Arial,"Liberation Sans",sans-serif}
+main{display:flex;flex-direction:column;gap:14px;padding:18px 20px;max-width:520px;margin:0 auto}
+h1{margin:0;font-size:20px}
+.big{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border:0;border-radius:12px;font:700 20px Arial,sans-serif;cursor:pointer;color:#fff;background:var(--red)}
+.big:hover{filter:brightness(1.1)} .big:disabled{opacity:.5;cursor:default}
+.big.stop{background:#333}
+.dot{width:14px;height:14px;border-radius:50%;background:#fff}
+.rec .dot{animation:blink 1s steps(2) infinite} @keyframes blink{50%{opacity:.2}}
+.row{display:flex;align-items:center;gap:12px}
+#time{font:700 34px/1 Arial,sans-serif;font-variant-numeric:tabular-nums;min-width:120px}
+.meter{flex:1;height:10px;background:#333;border-radius:5px;overflow:hidden}.meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .08s}
+.lbl{font-size:13px;color:var(--mut)}
+.box{background:var(--panel);border-radius:10px;padding:12px 14px;font-size:14px;color:#cfcfcf}
+.box b{color:#fff}
+select,button.sm{background:#2a2a2a;color:var(--fg);border:1px solid #3a3a3a;border-radius:8px;padding:6px 10px;font:inherit}
+#msg{min-height:22px;font-size:14px;color:#ffb3b5}
+#recover[hidden]{display:none}
+ol{margin:6px 0 0;padding-inline-start:20px}
+</style>
+</head>
+<body>
+<main>
+  <h1>הקלטת שיעור</h1>
+  <div id="recover" class="box" hidden><b>נמצאה הקלטה שלא נשמרה</b> (<span id="recLen"></span>).
+    <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
+  <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
+  <div class="row"><div id="time">0:00</div><div style="flex:1"><div class="lbl">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
+  <div class="row"><span class="lbl">פורמט:</span>
+    <select id="fmt"><option value="mp4">MP4 – נפתח בכל נגן</option><option value="webm">WebM – הכי יציב (נפתח בכרום / VLC)</option></select></div>
+  <div id="msg" role="status"></div>
+  <div class="box"><b>איך מקליטים</b><ol>
+    <li>לוחצים "התחל הקלטה".</li>
+    <li>בחלון של כרום בוחרים <b>כרטיסייה</b> ← כרטיסיית המצגת, ומסמנים <b>"שתף גם אודיו"</b> כדי שקול הסרטונים ייכנס.</li>
+    <li>מאשרים מיקרופון.</li>
+    <li>בסוף – "עצור ושמור". הקובץ יורד לתיקיית ההורדות, יחד עם קובץ פרקים לפי שקופיות.</li>
+  </ol><div class="lbl" style="margin-top:6px">ההקלטה נכתבת לדיסק כל כמה שניות, כך שגם אם משהו קורס – מה שהוקלט נשמר ואפשר לשחזר אותו כאן.</div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const PART_MS = 20000;               // close a part file every 20s so a crash loses at most that much
+let S = null;                        // current session
+const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('kmk-deck') : null;
+let curSlide = null;
+if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:(Date.now()-S.t0)/1000, vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
+try{ $('fmt').value = localStorage.getItem('kmk-rec-fmt') || 'mp4'; }catch(_){}
+$('fmt').onchange = ()=>{ try{ localStorage.setItem('kmk-rec-fmt', $('fmt').value); }catch(_){} };
+
+const pad = x => String(x).padStart(2,'0');
+const fmtT = s => { s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':':'')+(h?pad(m):m)+':'+pad(x); };
+function pickMime(pref){
+  const mp4 = ['video/mp4;codecs="avc1.42E01F,mp4a.40.2"','video/mp4;codecs="avc1.42E01E,mp4a.40.2"','video/mp4;codecs=avc1,mp4a.40.2'];
+  const webm = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
+  const list = pref==='webm' ? [...webm, ...mp4] : [...mp4, ...webm];
+  return list.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+async function opfs(){ try{ return await navigator.storage.getDirectory(); }catch(_){ return null; } }
+
+/* ---------- part files on disk (origin private file system) ---------- */
+async function newPart(){
+  if (!S.dir) return;
+  const name = 'p' + String(S.parts.length).padStart(5,'0');
+  const fh = await S.dir.getFileHandle(name, {create:true});
+  S.parts.push(name); S.w = await fh.createWritable();
+}
+function write(blob){
+  S.q = S.q.then(async ()=>{
+    if (!S.dir){ S.mem.push(blob); return; }
+    if (!S.w) await newPart();
+    await S.w.write(blob);
+    if (Date.now() - S.partT > PART_MS){ await S.w.close(); S.w = null; S.partT = Date.now();
+      await saveMeta(); }
+  }).catch(err=>{ $('msg').textContent = 'שגיאה בכתיבה לדיסק – ממשיך בזיכרון'; S.dir = null; S.mem.push(blob); });
+}
+async function saveMeta(){
+  if (!S.dir) return;
+  const fh = await S.dir.getFileHandle('meta.json', {create:true}); const w = await fh.createWritable();
+  await w.write(JSON.stringify({mime:S.mime, t0:S.t0, dur:(Date.now()-S.t0)/1000, parts:S.parts, marks:S.marks})); await w.close();
+}
+
+/* ---------- start / stop ---------- */
+async function start(){
+  $('msg').textContent = '';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder){ $('msg').textContent = 'הדפדפן לא תומך בהקלטה – השתמש בכרום או אדג׳.'; return; }
+  let display, mic = null;
+  try{
+    display = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30,max:30}, width:{max:1920}, height:{max:1080}},
+      audio:{suppressLocalAudioPlayback:false}, selfBrowserSurface:'exclude', surfaceSwitching:'include', systemAudio:'include', preferCurrentTab:false});
+  }catch(e){ return; }
+  try{ mic = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
+  catch(e){ $('msg').textContent = 'אין גישה למיקרופון – מקליט בלי קול המרצה.'; }
+  const ctx = new AudioContext(), dest = ctx.createMediaStreamDestination();
+  const da = display.getAudioTracks();
+  if (da.length){ const g = ctx.createGain(); g.gain.value = .8; ctx.createMediaStreamSource(new MediaStream(da)).connect(g).connect(dest); }
+  let an = null;
+  if (mic){ const src = ctx.createMediaStreamSource(mic); src.connect(dest); an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an); }
+  const out = new MediaStream([...display.getVideoTracks(), ...((da.length||mic) ? dest.stream.getAudioTracks() : [])]);
+  const mime = pickMime($('fmt').value);
+  let mr;
+  try{ mr = new MediaRecorder(out, mime ? {mimeType:mime, videoBitsPerSecond:2500000, audioBitsPerSecond:128000} : {}); }
+  catch(e){ mr = new MediaRecorder(out); }
+  const root = await opfs(); let dir = null;
+  if (root){ try{ dir = await root.getDirectoryHandle('rec_' + Date.now(), {create:true}); }catch(_){ dir = null; } }
+  S = {display, mic, ctx, an, mr, mime: mr.mimeType || mime, t0: Date.now(), partT: Date.now(), marks: [], parts: [], dir, w:null, q:Promise.resolve(), mem:[]};
+  if (curSlide) S.marks.push({t:0, vi:curSlide.vi, title:curSlide.title});
+  if (chan) chan.postMessage({type:'hello'});
+  mr.ondataavailable = e => { if (e.data && e.data.size) write(e.data); };
+  mr.onerror = e => { $('msg').textContent = 'שגיאה בהקלטה – שומר את מה שהוקלט.'; stop(); };
+  mr.onstop = finish;
+  display.getVideoTracks()[0].addEventListener('ended', stop);
+  mr.start(1000);
+  if (!da.length) $('msg').textContent = 'לא נבחר שיתוף אודיו – קול הסרטונים לא יוקלט (הקול שלך כן).';
+  document.body.classList.add('rec'); $('go').classList.add('stop'); $('goT').textContent = 'עצור ושמור'; $('fmt').disabled = true;
+  S.tick = setInterval(()=>{ $('time').textContent = fmtT((Date.now()-S.t0)/1000); }, 500);
+  if (an){ const buf = new Uint8Array(an.fftSize); const loop = ()=>{ if (!S) return; an.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk,Math.abs(v-128)); $('lvl').style.width = Math.min(100,pk/90*100)+'%'; requestAnimationFrame(loop); }; loop(); }
+}
+function stop(){ if (!S || S.stopping) return; S.stopping = true; try{ S.mr.state!=='inactive' ? S.mr.stop() : finish(); }catch(_){ finish(); } }
+async function finish(){
+  const s = S; if (!s || s.done) return; s.done = true;
+  clearInterval(s.tick);
+  [s.display, s.mic].forEach(st => st && st.getTracks().forEach(t=>t.stop()));
+  try{ s.ctx.close(); }catch(_){}
+  $('goT').textContent = 'שומר…'; $('go').disabled = true;
+  await s.q; if (s.w){ try{ await s.w.close(); }catch(_){} s.w = null; }
+  await saveMeta().catch(()=>{});
+  await deliver(s.dir, s.mime, s.parts, s.mem, s.marks, s.t0);
+  S = null;
+  document.body.classList.remove('rec'); $('go').classList.remove('stop'); $('goT').textContent = 'התחל הקלטה'; $('go').disabled = false; $('fmt').disabled = false; $('lvl').style.width = '0';
+}
+async function deliver(dir, mime, parts, mem, marks, t0){
+  const blobs = [];
+  if (dir) for (const p of parts){ blobs.push(await (await dir.getFileHandle(p)).getFile()); }   // file-backed, not loaded into memory
+  blobs.push(...(mem||[]));
+  if (!blobs.length){ $('msg').textContent = 'לא הוקלט כלום.'; return; }
+  const ext = (mime||'').includes('mp4') ? 'mp4' : 'webm';
+  const n = new Date(t0), base = `lesson-${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}_${pad(n.getHours())}${pad(n.getMinutes())}`;
+  dl(new Blob(blobs, {type: mime || 'video/webm'}), `${base}.${ext}`);
+  if (marks && marks.length) setTimeout(()=>dl(new Blob([marks.map(m=>`${fmtT(m.t)}  שקופית ${m.vi+1}${m.title?' — '+m.title:''}`).join('\n')+'\n'],{type:'text/plain;charset=utf-8'}), `${base}_chapters.txt`), 900);
+  $('msg').textContent = `נשמר: ${base}.${ext} (בתיקיית ההורדות)`;
+  if (dir) setTimeout(async ()=>{ try{ const root = await opfs(); await root.removeEntry(dir.name, {recursive:true}); }catch(_){} checkRecover(); }, 60000);
+}
+function dl(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+
+/* ---------- recover a recording that never got saved ---------- */
+let orphan = null;
+async function checkRecover(){
+  const root = await opfs(); orphan = null; $('recover').hidden = true; if (!root) return;
+  try{
+    for await (const [name, h] of root.entries()){
+      if (h.kind!=='directory' || !name.startsWith('rec_') || (S && S.dir && S.dir.name===name)) continue;
+      let meta = null; try{ meta = JSON.parse(await (await (await h.getFileHandle('meta.json')).getFile()).text()); }catch(_){}
+      const parts = []; for await (const [pn, ph] of h.entries()) if (pn.startsWith('p')) parts.push(pn);
+      if (!parts.length){ await root.removeEntry(name,{recursive:true}); continue; }
+      parts.sort(); orphan = {dir:h, parts, meta: meta || {mime:'', t0:+name.slice(4), marks:[], dur:0}};
+      $('recLen').textContent = meta && meta.dur ? 'כ־' + fmtT(meta.dur) : parts.length + ' חלקים'; $('recover').hidden = false; break;
+    }
+  }catch(_){}
+}
+$('recSave').onclick = async ()=>{ if (!orphan) return; const o = orphan; await deliver(o.dir, o.meta.mime, o.parts, [], o.meta.marks, o.meta.t0); };
+$('recDel').onclick = async ()=>{ if (!orphan) return; const root = await opfs(); try{ await root.removeEntry(orphan.dir.name,{recursive:true}); }catch(_){} checkRecover(); };
+
+$('go').onclick = ()=> S ? stop() : start();
+addEventListener('beforeunload', e=>{ if (S){ e.preventDefault(); e.returnValue=''; } });
+checkRecover();
+</script>
+</body>
+</html>
