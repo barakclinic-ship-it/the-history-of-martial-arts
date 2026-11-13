@@ -91,6 +91,7 @@ body.hidecursor{cursor:none}
   <div><b>G</b>כל השקופיות</div>
   <div><b>מספר + Enter</b>קפיצה לשקופית</div>
   <div><b>B / W</b>מסך שחור / לבן</div>
+  <div><b>R</b>הקלטת שיעור (מסך + קול) / עצירה ושמירה</div>
   <div><b>Home / End</b>ראשונה / אחרונה</div>
 </div></div>
 <div id="ui" aria-label="שליטה במצגת">
@@ -387,7 +388,7 @@ function show(j, opts={}){
   }
   layer = L; cur = j; step = 0;
   if (toEnd){ while (step < s.steps.length){ applyStep(L, j, step, false); step++; } }
-  updateUI();
+  updateUI(); markSlide();
   try{ history.replaceState(null,'','#'+(visible.indexOf(j)+1)); }catch(_){}
   preload(j);
 }
@@ -451,6 +452,7 @@ addEventListener('keydown', e=>{
   else if (k==='g'||k==='G') toggleGrid();
   else if (k==='b'||k==='B'||k==='.'){ const bl=document.getElementById('blank'); bl.style.background='#000'; bl.classList.toggle('on'); }
   else if (k==='w'||k==='W'||k===','){ const bl=document.getElementById('blank'); bl.style.background='#fff'; bl.classList.toggle('on'); }
+  else if (k==='r'||k==='R'){ rec.active ? stopRec() : startRec(window); }
   else if (k==='?') document.getElementById('help').classList.toggle('on');
 });
 document.getElementById('blank').onclick = e=>e.currentTarget.classList.remove('on');
@@ -459,6 +461,66 @@ document.getElementById('blank').onclick = e=>e.currentTarget.classList.remove('
 let tx0=null;
 addEventListener('touchstart', e=>{ tx0 = e.touches[0].clientX; }, {passive:true});
 addEventListener('touchend', e=>{ if (tx0==null) return; const dx = e.changedTouches[0].clientX - tx0; tx0=null; if (Math.abs(dx)>60){ dx<0 ? next() : prev(); } }, {passive:true});
+
+/* ---------- lesson recording ---------- */
+const rec = {active:false};
+function fmtT(sec){ sec=Math.floor(sec); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), x=sec%60; return (h?h+':':'')+String(m).padStart(h?2:1,'0')+':'+String(x).padStart(2,'0'); }
+function recUI(){
+  const W = (pv && !pv.closed) ? pv : null; if (!W) return;
+  const d = W.document, b = d.getElementById('recB'), t = d.getElementById('recT'), m = d.getElementById('mic');
+  if (!b) return;
+  b.classList.toggle('on', rec.active); b.textContent = rec.active ? 'עצור ושמור' : 'הקלט שיעור';
+  t.textContent = rec.active ? fmtT((Date.now()-rec.t0)/1000) : ''; m.hidden = !(rec.active && rec.analyser);
+}
+async function startRec(W){
+  if (rec.active) return;
+  const md = W.navigator.mediaDevices;
+  if (!md || !md.getDisplayMedia || !W.MediaRecorder){ W.alert('הדפדפן הזה לא תומך בהקלטת מסך. השתמש בכרום או באדג׳.'); return; }
+  let display, mic = null;
+  try{
+    display = await md.getDisplayMedia({video:{frameRate:30}, audio:{suppressLocalAudioPlayback:false},
+      preferCurrentTab: W===window, selfBrowserSurface:'include', surfaceSwitching:'include', systemAudio:'include'});
+  }catch(e){ return; }          // the lecturer cancelled the picker
+  try{ mic = await md.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
+  catch(e){ W.alert('לא התקבלה גישה למיקרופון – ההקלטה תמשיך בלי קול המרצה.'); }
+  const ctx = new W.AudioContext(), dest = ctx.createMediaStreamDestination();
+  const da = display.getAudioTracks();
+  if (da.length){ const g = ctx.createGain(); g.gain.value = 0.8; ctx.createMediaStreamSource(new W.MediaStream(da)).connect(g).connect(dest); }
+  let analyser = null;
+  if (mic){ const src = ctx.createMediaStreamSource(mic), g = ctx.createGain(); g.gain.value = 1.0; src.connect(g).connect(dest);
+    analyser = ctx.createAnalyser(); analyser.fftSize = 512; src.connect(analyser); }
+  const out = new W.MediaStream([...display.getVideoTracks(), ...(da.length||mic ? dest.stream.getAudioTracks() : [])]);
+  const types = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+  const mime = types.find(t=>W.MediaRecorder.isTypeSupported(t)) || '';
+  const mr = new W.MediaRecorder(out, mime ? {mimeType:mime, videoBitsPerSecond:4000000, audioBitsPerSecond:128000} : {});
+  Object.assign(rec, {active:true, W, mr, chunks:[], display, mic, ctx, analyser, mime, t0:Date.now(), marks:[]});
+  mr.ondataavailable = e=>{ if (e.data && e.data.size) rec.chunks.push(e.data); };
+  mr.onstop = saveRec;
+  display.getVideoTracks()[0].addEventListener('ended', ()=>stopRec());
+  mr.start(1000);
+  markSlide();
+  rec.tick = setInterval(recUI, 500);
+  if (analyser){ const buf = new Uint8Array(analyser.fftSize); const loop = ()=>{ if (!rec.active) return; analyser.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk, Math.abs(v-128)); const el = pv && !pv.closed && pv.document.querySelector('#mic i'); if (el) el.style.width = Math.min(100, pk/90*100)+'%'; W.requestAnimationFrame(loop); }; loop(); }
+  if (!da.length) W.alert('ההקלטה התחילה. שים לב: לא נבחר שיתוף אודיו, כך שקול הסרטונים לא יוקלט (קול המרצה כן). כדי לכלול אותו – בחר "כרטיסייה" וסמן "שתף גם אודיו".');
+  recUI();
+}
+function markSlide(){ if (!rec.active || cur==null) return; const vi = visible.indexOf(cur); const last = rec.marks[rec.marks.length-1]; if (last && last.vi===vi) return; rec.marks.push({t:(Date.now()-rec.t0)/1000, vi, title:titleOf(slides[cur])}); }
+function stopRec(){ if (!rec.active) return; rec.active = false; try{ rec.mr.stop(); }catch(_){ saveRec(); } clearInterval(rec.tick); recUI(); }
+function saveRec(){
+  const W = rec.W, d = W.document;
+  [rec.display, rec.mic].forEach(st=>st && st.getTracks().forEach(t=>t.stop()));
+  try{ rec.ctx.close(); }catch(_){}
+  if (!rec.chunks.length) return;
+  const ext = (rec.mime||'').startsWith('video/mp4') ? 'mp4' : 'webm';
+  const n = new Date(), pad = x=>String(x).padStart(2,'0');
+  const base = `lesson-${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())}_${pad(n.getHours())}${pad(n.getMinutes())}`;
+  const dl = (blob, name)=>{ const a = d.createElement('a'); a.href = W.URL.createObjectURL(blob); a.download = name; d.body.appendChild(a); a.click(); a.remove(); };
+  dl(new Blob(rec.chunks, {type: rec.mime||'video/webm'}), `${base}.${ext}`);
+  const ch = rec.marks.map(m=>`${fmtT(m.t)}  שקופית ${m.vi+1}${m.title?' — '+m.title:''}`).join('\n');
+  setTimeout(()=>dl(new Blob([ch+'\n'],{type:'text/plain;charset=utf-8'}), `${base}_chapters.txt`), 800);
+  rec.chunks = [];
+}
+addEventListener('beforeunload', e=>{ if (rec.active){ e.preventDefault(); e.returnValue=''; } });
 
 /* ---------- presenter view ---------- */
 const NOTE_KEY = 'kmk-notes:' + (document.title||'deck') + ':';
@@ -475,23 +537,33 @@ function openNotes(){
   pv.document.open();
   pv.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><base href="${location.href.split('#')[0]}"><title>מסך מרצה · ${document.title}</title><style>${css}
   html,body{overflow:hidden;background:#101010}
-  body{margin:0;color:#eee;font:16px/1.5 Arial,"Liberation Sans",sans-serif;display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100vh}
+  body{margin:0;color:#eee;font:16px/1.5 Arial,"Liberation Sans",sans-serif;display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh}
   header{display:flex;align-items:center;gap:18px;padding:10px 18px;background:#000;border-bottom:1px solid #222}
   header .sn{font-size:22px;font-weight:700} header .sn em{font-style:normal;color:#ff4b52}
   header .sp{flex:1}
   .clock{font-variant-numeric:tabular-nums;font-size:22px} .clock small{display:block;font-size:12px;opacity:.6;text-align:center}
   header button,.tools button{background:#262626;color:#eee;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
   header button:hover,.tools button:hover{background:#383838}
-  main{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:minmax(0,1fr);gap:16px;padding:16px 18px;min-height:0;overflow:hidden}
-  .now,.nextbox{position:relative;background:#000;border-radius:6px;overflow:hidden;aspect-ratio:16/9}
-  .now{height:100%;width:auto;max-width:100%;justify-self:center;align-self:start;outline:3px solid #c4161c}
-  .frame16{position:absolute;inset:0;overflow:hidden;background:#fff}
+  #wrap{position:relative;display:grid;grid-template-columns:var(--nw,56%) 12px minmax(0,1fr);min-height:0;padding:12px 14px}
+  #notesP{display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;min-width:0}
+  #viewsP{display:grid;grid-template-rows:var(--nh,64%) 12px minmax(0,1fr);min-height:0;min-width:0}
+  .cell{position:relative;min-height:0;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .box{position:relative;flex:1;min-height:0;background:#000;border-radius:6px;overflow:hidden}
+  .frame16{position:absolute;overflow:hidden;background:#fff}
   .frame16 .layer{transform-origin:0 0}
-  .tag{position:absolute;bottom:8px;right:8px;z-index:5;background:rgba(0,0,0,.75);color:#fff;font-size:13px;padding:3px 9px;border-radius:5px}
-  aside{display:flex;flex-direction:column;gap:10px;min-height:0}
-  .hint{font-size:15px;color:#bbb} .hint b{color:#fff}
+  .now .frame16{outline:3px solid #c4161c;outline-offset:-1px}
+  .lbl{font-size:14px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .lbl b{color:#fff}
+  .gut{position:relative}
+  #knob{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;background:#c4161c;border:3px solid #fff;
+    box-shadow:0 0 0 4px rgba(196,22,28,.25),0 2px 8px rgba(0,0,0,.6);cursor:move;z-index:20;touch-action:none}
+  #knob:hover,#knob.drag{transform:scale(1.15)}
+  #wrap.dragging{cursor:move;user-select:none}
   .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#eee;color:#555;font-size:40px}
-  section.notes{display:grid;grid-template-rows:auto minmax(0,1fr);padding:0 18px 14px;min-height:0;height:34vh}
+  #rec{display:flex;align-items:center;gap:8px}
+  #recB.on{background:#c4161c} #recT{font-variant-numeric:tabular-nums;color:#ff6b70;min-width:52px}
+  #recB.on::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-inline-end:6px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:.2}}
+  #mic{width:60px;height:8px;background:#333;border-radius:4px;overflow:hidden} #mic i{display:block;height:100%;width:0;background:#4caf50;transition:width .1s}
   .tools{display:flex;align-items:center;gap:8px;padding:6px 0}
   .tools .st{font-size:13px;opacity:.7;margin-inline-start:auto}
   textarea{width:100%;height:100%;resize:none;box-sizing:border-box;background:#1b1b1b;color:#f2f2f2;border:1px solid #333;border-radius:8px;padding:14px 16px;font:var(--nfs,22px)/1.55 Arial,"Liberation Sans",sans-serif;direction:rtl}
@@ -499,11 +571,19 @@ function openNotes(){
   </style></head><body>
   <header><div class="sn" id="sn"></div><div class="sp"></div>
     <div class="clock" id="el"></div><button id="rst" title="איפוס טיימר">⟲</button><div class="clock" id="wall"></div>
+    <div id="rec"><button id="recB" title="הקלטת השיעור: מסך + קול המרצה + קול הסרטונים">הקלט שיעור</button><span id="recT"></span><div id="mic" hidden><i></i></div></div>
     <button id="p">‹ הקודם</button><button id="n">הבא ›</button></header>
-  <main><div class="now"><span class="tag">מה שהסטודנטים רואים</span><div class="frame16" id="nowF"></div></div>
-    <aside><div class="hint" id="hint"></div><div class="nextbox"><div class="frame16" id="nextF"></div></div></aside></main>
-  <section class="notes"><div class="tools"><b>הערות</b><button id="am">א−</button><button id="ap">א+</button><button id="orig" hidden>החזר להערה המקורית</button><button id="exp">ייצוא כל ההערות</button><span class="st" id="st"></span></div>
-    <textarea id="ta" placeholder="אין הערות לשקופית הזאת. אפשר לכתוב כאן — נשמר אוטומטית."></textarea></section>
+  <div id="wrap">
+    <section id="notesP"><div class="tools"><b>הערות</b><button id="am">א−</button><button id="ap">א+</button><button id="orig" hidden>החזר להערה המקורית</button><button id="exp">ייצוא כל ההערות</button><span class="st" id="st"></span></div>
+      <textarea id="ta" placeholder="אין הערות לשקופית הזאת. אפשר לכתוב כאן — נשמר אוטומטית."></textarea></section>
+    <div class="gut"></div>
+    <section id="viewsP">
+      <div class="cell now"><div class="lbl"><b>מה שהסטודנטים רואים</b></div><div class="box"><div class="frame16" id="nowF"></div></div></div>
+      <div class="gut"></div>
+      <div class="cell"><div class="lbl" id="hint"></div><div class="box"><div class="frame16" id="nextF"></div></div></div>
+    </section>
+    <div id="knob" title="גרור כדי לשנות את החלוקה · לחיצה כפולה לאיפוס" role="slider" aria-label="חלוקת המסך" tabindex="0"></div>
+  </div>
   </body></html>`);
   pv.document.close();
   const d = pv.document;
@@ -523,18 +603,44 @@ function openNotes(){
   d.getElementById('orig').onclick = ()=>{ lsSet(NOTE_KEY+slides[cur].file, null); renderNotes(); };
   d.getElementById('exp').onclick = ()=>{
     const out = visible.map((i,vi)=>`שקופית ${vi+1}${titleOf(slides[i])?' — '+titleOf(slides[i]):''}\n${noteOf(i)||'(אין הערות)'}\n`).join('\n');
-    const a = d.createElement('a'); a.href = URL.createObjectURL(new Blob([out],{type:'text/plain;charset=utf-8'})); a.download = 'הערות למרצה.txt'; d.body.appendChild(a); a.click(); a.remove();
+    const a = d.createElement('a'); a.href = URL.createObjectURL(new Blob([out],{type:'text/plain;charset=utf-8'})); a.download = 'lecturer-notes.txt'; d.body.appendChild(a); a.click(); a.remove();
   };
   pv.addEventListener('keydown', e=>{
     const typing = e.target===ta;
     if (e.key==='Escape' && typing){ ta.blur(); return; }
+    if (e.target===d.getElementById('knob')) return;
     if (['PageDown'].includes(e.key) || (!typing && ['ArrowRight','ArrowDown',' '].includes(e.key))){ e.preventDefault(); next(); }
     else if (['PageUp'].includes(e.key) || (!typing && ['ArrowLeft','ArrowUp'].includes(e.key))){ e.preventDefault(); prev(); }
     else if (!typing && (e.key==='b'||e.key==='B')){ const bl=document.getElementById('blank'); bl.style.background='#000'; bl.classList.toggle('on'); }
   });
-  pv.addEventListener('resize', ()=>fitPv());
-  pv.addEventListener('beforeunload', ()=>{ clearInterval(pvSync); });
-  updateNotes();
+  pv.addEventListener('resize', ()=>{ placeKnob(); fitPv(); });
+  // one draggable point splits the three panes
+  const wrap = d.getElementById('wrap'), knob = d.getElementById('knob');
+  let lay = {nw:56, nh:64}; try{ Object.assign(lay, JSON.parse(lsGet('kmk-pv-layout')||'{}')); }catch(_){}
+  const applyLay = ()=>{ wrap.style.setProperty('--nw', lay.nw+'%'); wrap.style.setProperty('--nh', lay.nh+'%'); placeKnob(); fitPv(); };
+  function placeKnob(){
+    const g = d.querySelectorAll('.gut'), r = wrap.getBoundingClientRect();
+    const vg = g[0].getBoundingClientRect(), hg = g[1].getBoundingClientRect();
+    knob.style.left = (vg.left + vg.width/2 - r.left)+'px'; knob.style.top = (hg.top + hg.height/2 - r.top)+'px';
+  }
+  pv.placeKnob = placeKnob;
+  knob.addEventListener('pointerdown', e=>{ e.preventDefault(); knob.setPointerCapture(e.pointerId); knob.classList.add('drag'); wrap.classList.add('dragging'); });
+  knob.addEventListener('pointermove', e=>{
+    if (!knob.classList.contains('drag')) return;
+    const r = wrap.getBoundingClientRect(), padX = 14, padY = 12;
+    const nw = (r.right - padX - e.clientX) / (r.width - 2*padX) * 100;          // notes sit on the right
+    const v = d.getElementById('viewsP').getBoundingClientRect();
+    const nh = (e.clientY - v.top) / v.height * 100;
+    lay.nw = Math.max(18, Math.min(82, nw)); lay.nh = Math.max(15, Math.min(85, nh)); applyLay();
+  });
+  const endDrag = ()=>{ if (!knob.classList.contains('drag')) return; knob.classList.remove('drag'); wrap.classList.remove('dragging'); lsSet('kmk-pv-layout', JSON.stringify(lay)); };
+  knob.addEventListener('pointerup', endDrag); knob.addEventListener('pointercancel', endDrag);
+  knob.addEventListener('dblclick', ()=>{ lay = {nw:56, nh:64}; applyLay(); lsSet('kmk-pv-layout', JSON.stringify(lay)); });
+  knob.addEventListener('keydown', e=>{ const st=2; if (e.key==='ArrowLeft') lay.nw+=st; else if (e.key==='ArrowRight') lay.nw-=st; else if (e.key==='ArrowUp') lay.nh-=st; else if (e.key==='ArrowDown') lay.nh+=st; else return; e.preventDefault(); e.stopPropagation(); lay.nw=Math.max(18,Math.min(82,lay.nw)); lay.nh=Math.max(15,Math.min(85,lay.nh)); applyLay(); lsSet('kmk-pv-layout', JSON.stringify(lay)); });
+  applyLay();
+  d.getElementById('recB').onclick = ()=> rec.active ? stopRec() : startRec(pv);
+  pv.addEventListener('beforeunload', e=>{ if (rec.active && rec.W===pv){ e.preventDefault(); e.returnValue=''; return; } clearInterval(pvSync); });
+  updateNotes(); recUI();
   clearInterval(pvSync); pvSync = setInterval(syncPv, 400);
 }
 function mirror(host, i, steps){
@@ -551,7 +657,11 @@ function mirror(host, i, steps){
 }
 function fitPv(){
   if (!pv || pv.closed) return;
-  pv.document.querySelectorAll('.frame16').forEach(h=>{ const L=h.firstChild; if (L) L.style.transform=`scale(${h.clientWidth/SW})`; });
+  pv.document.querySelectorAll('.frame16').forEach(h=>{
+    const box = h.parentElement, bw = box.clientWidth, bh = box.clientHeight, k = Math.min(bw/SW, bh/SH);
+    h.style.width = (SW*k)+'px'; h.style.height = (SH*k)+'px'; h.style.left = ((bw-SW*k)/2)+'px'; h.style.top = ((bh-SH*k)/2)+'px';
+    const L = h.firstChild; if (L) L.style.transform = `scale(${k})`;
+  });
 }
 function describeStep(i,k){
   const acts = slides[i].steps[k]||[];
