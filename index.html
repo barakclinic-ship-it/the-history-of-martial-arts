@@ -40,6 +40,15 @@ body.hidecursor{cursor:none}
 .morphing .el *{transition-property:font-size,color,background-color,opacity,border-color;transition-timing-function:inherit}
 .fadeout{transition:opacity var(--d,.5s) ease;opacity:0!important}
 .fadein{animation:fadein var(--d,.5s) ease both}
+.layer.xin{animation:fadein .45s ease both}
+.pic img.kb{animation:kb 16s ease-out both;transform-origin:50% 50%}
+.pic img.kb.o2{animation-name:kb2}
+@keyframes kb{from{transform:scale(1)}to{transform:scale(1.07) translate(-.6%,-.4%)}}
+@keyframes kb2{from{transform:scale(1.07) translate(.6%,.3%)}to{transform:scale(1)}}
+.el.tabin{animation:tabin .55s cubic-bezier(.2,.8,.2,1) both;animation-delay:var(--td,.2s)}
+@keyframes tabin{from{translate:0 -64px;opacity:0}to{translate:0 0;opacity:1}}
+.still *,.still{animation:none!important;transition:none!important}
+@media (prefers-reduced-motion: reduce){.pic img.kb,.el.tabin,.layer.xin{animation:none}}
 @keyframes fadein{from{opacity:0}to{opacity:1}}
 /* screens */
 #blank{position:fixed;inset:0;display:none;z-index:40}
@@ -78,7 +87,7 @@ body.hidecursor{cursor:none}
   <div><b>→ / רווח / קליק</b>הבא</div>
   <div><b>←</b>הקודם</div>
   <div><b>F</b>מסך מלא</div>
-  <div><b>N</b>חלון הערות למרצה</div>
+  <div><b>N</b>מסך מרצה (הערות + תצוגה)</div>
   <div><b>G</b>כל השקופיות</div>
   <div><b>מספר + Enter</b>קפיצה לשקופית</div>
   <div><b>B / W</b>מסך שחור / לבן</div>
@@ -89,7 +98,7 @@ body.hidecursor{cursor:none}
   <span class="num" id="num"></span>
   <button id="bPrev" title="הקודם (←)">‹</button>
   <button id="bGrid" title="כל השקופיות (G)">▦</button>
-  <button id="bNotes" title="הערות (N)">הערות</button>
+  <button id="bNotes" title="מסך מרצה (N)">מסך מרצה</button>
   <button id="bFull" title="מסך מלא (F)">⛶</button>
   <button id="bHelp" title="קיצורים">?</button>
 </div>
@@ -200,7 +209,9 @@ function renderPic(e, div){
     div.addEventListener('click', ev=>{ ev.stopPropagation(); if (v.paused) v.play(); else v.pause(); });
     div.addEventListener('mousemove', ()=>{ v.controls = true; clearTimeout(v._t); v._t=setTimeout(()=>v.controls=false,2200); });
   } else if (e.src){
-    const img = document.createElement('img'); img.src = (window.MEDIA&&MEDIA[e.src])||e.src; img.alt = e.descr||''; img.draggable=false; img.decoding='async';
+    const img = document.createElement('img');
+    if (e.w*e.h >= 0.35*SW*SH && !e.link){ img.classList.add('kb'); if ((+e.id)%2) img.classList.add('o2'); }
+    img.src = (window.MEDIA&&MEDIA[e.src])||e.src; img.alt = e.descr||''; img.draggable=false; img.decoding='async';
     const [cl,ct,cr,cb] = e.crop || [0,0,0,0];
     const iw = e.w/(1-cl-cr||1), ih = e.h/(1-ct-cb||1);
     img.style.width = iw+'px'; img.style.height = ih+'px';
@@ -221,11 +232,15 @@ function renderFrame(e, div){
   if (e.fallback){ const a=document.createElement('a'); a.className='ytfall'; a.href=e.fallback; a.target='_blank'; a.rel='noopener'; a.textContent=e.fallbackText||'פתח בדפדפן'; a.dataset.stop='1'; div.appendChild(a); }
 }
 
+function isTab(e){ return e.y>=128 && e.y+e.h<=215 && e.w<460 && e.x>1000 && e.type!=='pic'; }
+function textOf(e){ return e.text ? e.text.paras.map(p=>p.runs.map(r=>r.t||'').join('')).join(' ').trim() : ''; }
+function tabKey(e){ return Math.round(e.x/8)+'|'+(e.fill||'')+'|'+textOf(e); }
 function renderEl(e){
   const div = document.createElement('div');
   div.className = 'el'; div.dataset.name = e.name; div.dataset.id = e.id;
   applyBox(div, e);
   if (e.hid) div.classList.add('hid');
+  if (isTab(e)){ div.classList.add('tabin'); div.style.setProperty('--td', (0.18 + Math.max(0,(SW-e.x-e.w))/900).toFixed(2)+'s'); div.dataset.tab = tabKey(e); }
   if (e.type==='frame'){ renderFrame(e, div); return div; }
   if (e.type==='pic'){ renderPic(e, div); }
   else {
@@ -332,6 +347,18 @@ function morphTo(j, dur){
   return newL;
 }
 
+/* ---------- section zoom: from the hub circle into its section ---------- */
+function hubZoom(A, B){
+  if (!A || !B) return null;
+  const circles = A.els.filter(e=>e.geom==='ellipse' && e.text);
+  if (circles.length < 6) return null;
+  const tab = B.els.find(e=>isTab(e) && textOf(e) && /c00000|c4161c|ff0000/i.test(JSON.stringify(e.text)+e.fill) ) || B.els.find(e=>isTab(e) && textOf(e));
+  const label = tab ? textOf(tab) : '';
+  const c = circles.find(e=>textOf(e).replace(/\s/g,'')===label.replace(/\s/g,'')) ;
+  if (!c) return null;
+  return {cx:c.x+c.w/2, cy:c.y+c.h/2, r:Math.min(c.w,c.h)/2};
+}
+
 /* ---------- navigation ---------- */
 function stopMedia(L){ if (L) L.querySelectorAll('video').forEach(v=>v.pause()); }
 function show(j, opts={}){
@@ -344,9 +371,19 @@ function show(j, opts={}){
     busy = true; L = morphTo(j, s.dur||1000);
   } else {
     L = buildLayer(j);
-    if (layer && animate && s.trans==='fade'){ L.style.setProperty('--d','.6s'); L.classList.add('fadein'); }
+    const prevS = cur!=null ? slides[cur] : null;
+    // tabs that look the same as on the previous slide stay put
+    if (prevS){ const keep = new Set(prevS.els.filter(isTab).map(tabKey)); L.querySelectorAll('.el.tabin').forEach(d=>{ if (keep.has(d.dataset.tab)) d.classList.remove('tabin'); }); }
+    if (!(layer && animate)) L.querySelectorAll('.el.tabin').forEach(d=>d.classList.remove('tabin'));
     stage.appendChild(L);
-    if (layer){ const o=layer; if (animate && s.trans==='fade') setTimeout(()=>o.remove(),620); else o.remove(); }
+    const zoom = (layer && animate) ? hubZoom(prevS, s) : null;
+    if (zoom){
+      busy = true;
+      const a = L.animate([{clipPath:`circle(${zoom.r}px at ${zoom.cx}px ${zoom.cy}px)`},{clipPath:`circle(2300px at ${zoom.cx}px ${zoom.cy}px)`}],{duration:950,easing:'cubic-bezier(.65,0,.25,1)'});
+      const o = layer; a.onfinish = ()=>{ o.remove(); busy=false; };
+    } else if (layer && animate){
+      L.classList.add('xin'); const o = layer; setTimeout(()=>o.remove(), 470);
+    } else if (layer){ layer.remove(); }
   }
   layer = L; cur = j; step = 0;
   if (toEnd){ while (step < s.steps.length){ applyStep(L, j, step, false); step++; } }
@@ -423,36 +460,136 @@ let tx0=null;
 addEventListener('touchstart', e=>{ tx0 = e.touches[0].clientX; }, {passive:true});
 addEventListener('touchend', e=>{ if (tx0==null) return; const dx = e.changedTouches[0].clientX - tx0; tx0=null; if (Math.abs(dx)>60){ dx<0 ? next() : prev(); } }, {passive:true});
 
-/* ---------- notes window ---------- */
-let notesWin = null, t0 = Date.now();
+/* ---------- presenter view ---------- */
+const NOTE_KEY = 'kmk-notes:' + (document.title||'deck') + ':';
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(_){ return null; } }
+function lsSet(k,v){ try{ v==null ? localStorage.removeItem(k) : localStorage.setItem(k,v); return true; }catch(_){ return false; } }
+function noteOf(i){ const v = lsGet(NOTE_KEY+slides[i].file); return v!=null ? v : (slides[i].notes||''); }
+function titleOf(s){ for (const e of s.els){ if (e.text && e.y<140){ const t=textOf(e); if (t) return t; } } return ''; }
+let pv = null, t0 = Date.now(), pvSync = null;
 function openNotes(){
-  if (notesWin && !notesWin.closed){ notesWin.focus(); return; }
-  notesWin = window.open('', 'notes', 'width=760,height=620');
-  if (!notesWin) return;
-  notesWin.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>הערות למרצה</title><style>
-  body{margin:0;font:22px/1.6 Arial,sans-serif;background:#141414;color:#eee;display:flex;flex-direction:column;height:100vh}
-  header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#000;font-size:18px}
-  header b{color:#ff4b52;font-size:26px} #clock{font-variant-numeric:tabular-nums;opacity:.8}
-  #notes{flex:1;overflow:auto;padding:18px 24px;white-space:pre-wrap}
-  #next{padding:10px 20px;background:#1e1e1e;font-size:17px;opacity:.85}
-  nav{display:flex;gap:8px;padding:10px 20px;background:#000} nav button{flex:1;font:inherit;font-size:18px;padding:10px;border:0;border-radius:8px;background:#2a2a2a;color:#fff;cursor:pointer}
-  </style></head><body><header><b id="sn"></b><span id="clock"></span></header><div id="notes"></div><div id="next"></div>
-  <nav><button id="p">‹ הקודם</button><button id="n">הבא ›</button></nav></body></html>`);
-  notesWin.document.close();
-  notesWin.document.getElementById('n').onclick = ()=>next();
-  notesWin.document.getElementById('p').onclick = ()=>prev();
-  notesWin.addEventListener('keydown', e=>{ if (['ArrowRight','ArrowDown','PageDown',' '].includes(e.key)){ e.preventDefault(); next(); } else if (['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){ e.preventDefault(); prev(); } });
+  if (pv && !pv.closed){ pv.focus(); return; }
+  pv = window.open('', 'presenter', 'width=1400,height=860');
+  if (!pv) return;
+  const css = document.querySelector('style').textContent;
+  pv.document.open();
+  pv.document.write(`<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><base href="${location.href.split('#')[0]}"><title>מסך מרצה · ${document.title}</title><style>${css}
+  html,body{overflow:hidden;background:#101010}
+  body{margin:0;color:#eee;font:16px/1.5 Arial,"Liberation Sans",sans-serif;display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100vh}
+  header{display:flex;align-items:center;gap:18px;padding:10px 18px;background:#000;border-bottom:1px solid #222}
+  header .sn{font-size:22px;font-weight:700} header .sn em{font-style:normal;color:#ff4b52}
+  header .sp{flex:1}
+  .clock{font-variant-numeric:tabular-nums;font-size:22px} .clock small{display:block;font-size:12px;opacity:.6;text-align:center}
+  header button,.tools button{background:#262626;color:#eee;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+  header button:hover,.tools button:hover{background:#383838}
+  main{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:minmax(0,1fr);gap:16px;padding:16px 18px;min-height:0;overflow:hidden}
+  .now,.nextbox{position:relative;background:#000;border-radius:6px;overflow:hidden;aspect-ratio:16/9}
+  .now{height:100%;width:auto;max-width:100%;justify-self:center;align-self:start;outline:3px solid #c4161c}
+  .frame16{position:absolute;inset:0;overflow:hidden;background:#fff}
+  .frame16 .layer{transform-origin:0 0}
+  .tag{position:absolute;bottom:8px;right:8px;z-index:5;background:rgba(0,0,0,.75);color:#fff;font-size:13px;padding:3px 9px;border-radius:5px}
+  aside{display:flex;flex-direction:column;gap:10px;min-height:0}
+  .hint{font-size:15px;color:#bbb} .hint b{color:#fff}
+  .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#eee;color:#555;font-size:40px}
+  section.notes{display:grid;grid-template-rows:auto minmax(0,1fr);padding:0 18px 14px;min-height:0;height:34vh}
+  .tools{display:flex;align-items:center;gap:8px;padding:6px 0}
+  .tools .st{font-size:13px;opacity:.7;margin-inline-start:auto}
+  textarea{width:100%;height:100%;resize:none;box-sizing:border-box;background:#1b1b1b;color:#f2f2f2;border:1px solid #333;border-radius:8px;padding:14px 16px;font:var(--nfs,22px)/1.55 Arial,"Liberation Sans",sans-serif;direction:rtl}
+  textarea:focus{outline:2px solid #c4161c;border-color:transparent}
+  </style></head><body>
+  <header><div class="sn" id="sn"></div><div class="sp"></div>
+    <div class="clock" id="el"></div><button id="rst" title="איפוס טיימר">⟲</button><div class="clock" id="wall"></div>
+    <button id="p">‹ הקודם</button><button id="n">הבא ›</button></header>
+  <main><div class="now"><span class="tag">מה שהסטודנטים רואים</span><div class="frame16" id="nowF"></div></div>
+    <aside><div class="hint" id="hint"></div><div class="nextbox"><div class="frame16" id="nextF"></div></div></aside></main>
+  <section class="notes"><div class="tools"><b>הערות</b><button id="am">א−</button><button id="ap">א+</button><button id="orig" hidden>החזר להערה המקורית</button><button id="exp">ייצוא כל ההערות</button><span class="st" id="st"></span></div>
+    <textarea id="ta" placeholder="אין הערות לשקופית הזאת. אפשר לכתוב כאן — נשמר אוטומטית."></textarea></section>
+  </body></html>`);
+  pv.document.close();
+  const d = pv.document;
+  d.getElementById('n').onclick = ()=>next();
+  d.getElementById('p').onclick = ()=>prev();
+  d.getElementById('rst').onclick = ()=>{ t0 = Date.now(); };
+  let nfs = +(lsGet('kmk-notes-fs')||22);
+  const setFs = ()=>{ d.documentElement.style.setProperty('--nfs', nfs+'px'); lsSet('kmk-notes-fs', nfs); };
+  setFs();
+  d.getElementById('am').onclick = ()=>{ nfs=Math.max(14,nfs-2); setFs(); };
+  d.getElementById('ap').onclick = ()=>{ nfs=Math.min(44,nfs+2); setFs(); };
+  const ta = d.getElementById('ta'); let saveT;
+  ta.addEventListener('input', ()=>{
+    clearTimeout(saveT); d.getElementById('st').textContent='…';
+    saveT = setTimeout(()=>{ const i=cur; const ok = lsSet(NOTE_KEY+slides[i].file, ta.value); d.getElementById('st').textContent = ok ? 'נשמר ✓' : 'לא נשמר – הדפדפן חוסם שמירה'; d.getElementById('orig').hidden = ta.value===(slides[i].notes||''); }, 400);
+  });
+  d.getElementById('orig').onclick = ()=>{ lsSet(NOTE_KEY+slides[cur].file, null); renderNotes(); };
+  d.getElementById('exp').onclick = ()=>{
+    const out = visible.map((i,vi)=>`שקופית ${vi+1}${titleOf(slides[i])?' — '+titleOf(slides[i]):''}\n${noteOf(i)||'(אין הערות)'}\n`).join('\n');
+    const a = d.createElement('a'); a.href = URL.createObjectURL(new Blob([out],{type:'text/plain;charset=utf-8'})); a.download = 'הערות למרצה.txt'; d.body.appendChild(a); a.click(); a.remove();
+  };
+  pv.addEventListener('keydown', e=>{
+    const typing = e.target===ta;
+    if (e.key==='Escape' && typing){ ta.blur(); return; }
+    if (['PageDown'].includes(e.key) || (!typing && ['ArrowRight','ArrowDown',' '].includes(e.key))){ e.preventDefault(); next(); }
+    else if (['PageUp'].includes(e.key) || (!typing && ['ArrowLeft','ArrowUp'].includes(e.key))){ e.preventDefault(); prev(); }
+    else if (!typing && (e.key==='b'||e.key==='B')){ const bl=document.getElementById('blank'); bl.style.background='#000'; bl.classList.toggle('on'); }
+  });
+  pv.addEventListener('resize', ()=>fitPv());
+  pv.addEventListener('beforeunload', ()=>{ clearInterval(pvSync); });
   updateNotes();
+  clearInterval(pvSync); pvSync = setInterval(syncPv, 400);
 }
-function titleOf(s){ for (const e of s.els){ if (e.text && e.y<140){ return e.text.paras.map(p=>p.runs.map(r=>r.t||'').join('')).join(' ').trim(); } } return ''; }
+function mirror(host, i, steps){
+  host.textContent = '';
+  const L = buildLayer(i); L.classList.add('still');
+  for (let k=0;k<steps;k++) applyStep(L, i, k, false);
+  L.querySelectorAll('.tabin').forEach(x=>x.classList.remove('tabin'));
+  L.querySelectorAll('iframe').forEach(f=>{ const ph=document.createElement('div'); ph.className='ph'; ph.textContent='תוכן אינטראקטיבי'; f.replaceWith(ph); });
+  L.querySelectorAll('.ytfall').forEach(x=>x.remove());
+  L.querySelectorAll('video').forEach(v=>{ v.muted=true; v.controls=false; v.preload='auto'; });
+  L.querySelectorAll('[data-stop],.el').forEach(x=>x.style.pointerEvents='none');
+  host.appendChild(L);
+  return L;
+}
+function fitPv(){
+  if (!pv || pv.closed) return;
+  pv.document.querySelectorAll('.frame16').forEach(h=>{ const L=h.firstChild; if (L) L.style.transform=`scale(${h.clientWidth/SW})`; });
+}
+function describeStep(i,k){
+  const acts = slides[i].steps[k]||[];
+  const kinds = new Set(); acts.forEach(a=>{ if (a.play) kinds.add('סרטון מתחיל'); if (a.show) kinds.add('אלמנט מופיע'); if (a.hide) kinds.add('אלמנט נעלם'); });
+  return [...kinds].join(' + ') || 'שלב הבא';
+}
+function renderNotes(){
+  const d = pv.document, ta = d.getElementById('ta');
+  ta.value = noteOf(cur);
+  d.getElementById('orig').hidden = lsGet(NOTE_KEY+slides[cur].file)==null;
+  d.getElementById('st').textContent = '';
+}
 function updateNotes(){
-  if (!notesWin || notesWin.closed) return;
-  const d = notesWin.document, s = slides[cur], vi = visible.indexOf(cur);
-  d.getElementById('sn').textContent = `שקופית ${vi+1} / ${visible.length}` + (s.steps.length ? `  ·  שלב ${step}/${s.steps.length}` : '');
-  d.getElementById('notes').textContent = s.notes || '— אין הערות לשקופית הזאת —';
-  const nx = visible[vi+1]; d.getElementById('next').textContent = nx!=null ? 'הבאה: ' + (titleOf(slides[nx]) || ('שקופית '+(vi+2))) : 'זו השקופית האחרונה';
+  if (!pv || pv.closed) return;
+  const d = pv.document, s = slides[cur], vi = visible.indexOf(cur);
+  d.getElementById('sn').innerHTML = `שקופית <em>${vi+1}</em> / ${visible.length}` + (s.steps.length ? ` &nbsp;·&nbsp; קליק ${step}/${s.steps.length}` : '') + (titleOf(s) ? ` &nbsp;·&nbsp; ${titleOf(s).replace(/</g,'&lt;')}` : '');
+  if (d.activeElement !== d.getElementById('ta') || d.getElementById('ta')._slide !== cur){ renderNotes(); d.getElementById('ta')._slide = cur; }
+  pv._now = mirror(d.getElementById('nowF'), cur, step);
+  let ni, ns, label;
+  if (step < s.steps.length){ ni = cur; ns = step+1; label = `<b>בקליק הבא:</b> ${describeStep(cur, step)}`; }
+  else if (visible[vi+1]!=null){ ni = visible[vi+1]; ns = 0; label = `<b>הבאה:</b> שקופית ${vi+2}${titleOf(slides[ni])?' — '+titleOf(slides[ni]).replace(/</g,'&lt;'):''}`; }
+  else { ni = null; label = '<b>זו השקופית האחרונה</b>'; }
+  d.getElementById('hint').innerHTML = label;
+  if (ni!=null) mirror(d.getElementById('nextF'), ni, ns); else d.getElementById('nextF').textContent='';
+  fitPv();
 }
-setInterval(()=>{ if (notesWin && !notesWin.closed){ const s=Math.floor((Date.now()-t0)/1000); notesWin.document.getElementById('clock').textContent = `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; } }, 1000);
+function syncPv(){
+  if (!pv || pv.closed){ clearInterval(pvSync); return; }
+  const d = pv.document, sec = Math.floor((Date.now()-t0)/1000);
+  d.getElementById('el').innerHTML = `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}<small>זמן שיעור</small>`;
+  const now = new Date(); d.getElementById('wall').innerHTML = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}<small>שעה</small>`;
+  if (pv._now && layer) pv._now.querySelectorAll('.el[data-id]').forEach(el=>{
+    const pvV = el.querySelector('video'); if (!pvV) return;
+    const mv = layer.querySelector(`.el[data-id="${el.dataset.id}"] video`); if (!mv) return;
+    if (!mv.paused){ if (Math.abs(pvV.currentTime-mv.currentTime)>0.5) pvV.currentTime = mv.currentTime; if (pvV.paused) pvV.play().catch(()=>{}); }
+    else if (!pvV.paused) pvV.pause();
+  });
+}
 
 /* ---------- grid ---------- */
 let gridBuilt = false;
