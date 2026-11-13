@@ -35,7 +35,7 @@ ol{margin:6px 0 0;padding-inline-start:20px}
   <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
   <div class="row"><div id="time">0:00</div><div style="flex:1"><div class="lbl">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
   <div class="row"><span class="lbl">פורמט:</span>
-    <select id="fmt"><option value="mp4">MP4 – נפתח בכל נגן</option><option value="webm">WebM – הכי יציב (נפתח בכרום / VLC)</option></select></div>
+    <select id="fmt"><option value="webm">WebM – יציב (מומלץ)</option><option value="mp4">MP4 – ניסיוני, עלול לקרוס</option></select></div>
   <div id="msg" role="status"></div>
   <div class="box"><b>איך מקליטים</b><ol>
     <li>לוחצים "התחל הקלטה".</li>
@@ -51,15 +51,15 @@ let S = null;                        // current session
 const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('kmk-deck') : null;
 let curSlide = null;
 if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:(Date.now()-S.t0)/1000, vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
-try{ $('fmt').value = localStorage.getItem('kmk-rec-fmt') || 'mp4'; }catch(_){}
-$('fmt').onchange = ()=>{ try{ localStorage.setItem('kmk-rec-fmt', $('fmt').value); }catch(_){} };
+try{ $('fmt').value = localStorage.getItem('kmk-rec-fmt2') || 'webm'; }catch(_){}
+$('fmt').onchange = ()=>{ try{ localStorage.setItem('kmk-rec-fmt2', $('fmt').value); }catch(_){} };
 
 const pad = x => String(x).padStart(2,'0');
 const fmtT = s => { s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':':'')+(h?pad(m):m)+':'+pad(x); };
 function pickMime(pref){
   const mp4 = ['video/mp4;codecs="avc1.42E01F,mp4a.40.2"','video/mp4;codecs="avc1.42E01E,mp4a.40.2"','video/mp4;codecs=avc1,mp4a.40.2'];
-  const webm = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm'];
-  const list = pref==='webm' ? [...webm, ...mp4] : [...mp4, ...webm];
+  const webm = ['video/webm;codecs=vp8,opus','video/webm;codecs=vp8','video/webm'];
+  const list = pref==='mp4' ? [...mp4, ...webm] : webm;
   return list.find(t => MediaRecorder.isTypeSupported(t)) || '';
 }
 async function opfs(){ try{ return await navigator.storage.getDirectory(); }catch(_){ return null; } }
