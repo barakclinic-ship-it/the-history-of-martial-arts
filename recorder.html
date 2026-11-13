@@ -39,7 +39,7 @@ ol{margin:6px 0 0;padding-inline-start:20px}
   <div id="msg" role="status"></div>
   <div class="box"><b>איך מקליטים</b><ol>
     <li>לוחצים "התחל הקלטה".</li>
-    <li>בחלון של כרום בוחרים <b>כרטיסייה</b> ← כרטיסיית המצגת, ומסמנים <b>"שתף גם אודיו"</b> כדי שקול הסרטונים ייכנס.</li>
+    <li>בחלון של כרום בוחרים <b>"כל המסך" (Entire screen)</b> ← המסך שמוצגת עליו המצגת לסטודנטים, ומסמנים <b>"שתף גם אודיו מערכת"</b> כדי שקול הסרטונים ייכנס.<br><span class="lbl">לא לבחור "כרטיסייה" – זה מפיל את המצגת.</span></li>
     <li>מאשרים מיקרופון.</li>
     <li>בסוף – "עצור ושמור". הקובץ יורד לתיקיית ההורדות, יחד עם קובץ פרקים לפי שקופיות.</li>
   </ol><div class="lbl" style="margin-top:6px">ההקלטה נכתבת לדיסק כל כמה שניות, כך שגם אם משהו קורס – מה שהוקלט נשמר ואפשר לשחזר אותו כאן.</div></div>
@@ -92,12 +92,15 @@ async function start(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia || !window.MediaRecorder){ $('msg').textContent = 'הדפדפן לא תומך בהקלטה – השתמש בכרום או אדג׳.'; return; }
   let display, mic = null;
   try{
-    display = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30,max:30}, width:{max:1920}, height:{max:1080}},
-      audio:{suppressLocalAudioPlayback:false}, selfBrowserSurface:'exclude', surfaceSwitching:'include', systemAudio:'include', preferCurrentTab:false});
+    display = await navigator.mediaDevices.getDisplayMedia({video:{displaySurface:'monitor', frameRate:{ideal:30,max:30}, width:{max:1920}, height:{max:1080}},
+      audio:{suppressLocalAudioPlayback:false}, selfBrowserSurface:'exclude', surfaceSwitching:'exclude', monitorTypeSurfaces:'include', systemAudio:'include', preferCurrentTab:false});
   }catch(e){ return; }
   try{ mic = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}); }
   catch(e){ $('msg').textContent = 'אין גישה למיקרופון – מקליט בלי קול המרצה.'; }
   const ctx = new AudioContext(), dest = ctx.createMediaStreamDestination();
+  const surf = (display.getVideoTracks()[0].getSettings()||{}).displaySurface;
+  if (surf==='browser'){ display.getTracks().forEach(t=>t.stop()); if (mic) mic.getTracks().forEach(t=>t.stop());
+    $('msg').textContent = 'נבחרה כרטיסייה – זה מפיל את המצגת. לחץ שוב ובחר "כל המסך".'; return; }
   const da = display.getAudioTracks();
   if (da.length){ const g = ctx.createGain(); g.gain.value = .8; ctx.createMediaStreamSource(new MediaStream(da)).connect(g).connect(dest); }
   let an = null;
