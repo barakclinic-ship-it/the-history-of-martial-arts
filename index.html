@@ -505,6 +505,15 @@ function next(){
 }
 function prev(){
   if (busy) return;
+  if (step > 0){                       // undo the last click on this slide (e.g. a journey station) before leaving it
+    stopMedia(layer);
+    const L = buildLayer(cur); L.querySelectorAll('.tabin').forEach(x=>x.classList.remove('tabin'));
+    L.querySelectorAll('img.kb').forEach(x=>x.classList.add('still'));
+    const n = step-1; for (let k=0;k<n;k++) applyStep(L, cur, k, false);
+    if (L._j && n===0){ L._j.prog.style.strokeDashoffset = L._j.g.total; }
+    stage.appendChild(L); layer.remove(); layer = L; step = n;
+    updateUI(); return;
+  }
   const vi = visible.indexOf(cur); if (vi > 0) show(visible[vi-1], {toEnd:true, animate:false});
 }
 function preload(j){
