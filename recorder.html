@@ -52,7 +52,8 @@ const PART_MS = 20000;               // close a part file every 20s so a crash l
 let S = null;                        // current session
 const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('kmk-deck') : null;
 let curSlide = null;
-if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:(Date.now()-S.t0)/1000, vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
+const recSay = ()=>{ if (chan) chan.postMessage({type:'rec', on:!!(S && !S.stopping), t0: S ? S.t0 : 0}); };
+if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='recq') recSay(); if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:(Date.now()-S.t0)/1000, vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
 try{ $('fmt').value = localStorage.getItem('kmk-rec-fmt2') || 'webm'; }catch(_){}
 $('fmt').onchange = ()=>{ try{ localStorage.setItem('kmk-rec-fmt2', $('fmt').value); }catch(_){} };
 
@@ -174,13 +175,15 @@ async function start2(){
   mr.start(1000);
   if (!da.length) $('msg').textContent = 'לא נבחר שיתוף אודיו – קול הסרטונים לא יוקלט (הקול שלך כן).';
   document.body.classList.add('rec'); $('go').classList.add('stop'); $('goT').textContent = 'עצור ושמור'; $('fmt').disabled = true;
-  S.tick = setInterval(()=>{ $('time').textContent = fmtT((Date.now()-S.t0)/1000); }, 500);
+  S.tick = setInterval(()=>{ $('time').textContent = fmtT((Date.now()-S.t0)/1000); if (Date.now()-(S.said||0) > 2000){ S.said = Date.now(); recSay(); } }, 500);
+  recSay();
   if (an){ const buf = new Uint8Array(an.fftSize); const loop = ()=>{ if (!S) return; an.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk,Math.abs(v-128)); $('lvl').style.width = Math.min(100,pk/90*100)+'%'; requestAnimationFrame(loop); }; loop(); }
 }
 function stop(){ if (!S || S.stopping) return; S.stopping = true; try{ S.mr.state!=='inactive' ? S.mr.stop() : finish(); }catch(_){ finish(); } }
 async function finish(){
   const s = S; if (!s || s.done) return; s.done = true;
   clearInterval(s.tick);
+  if (chan) chan.postMessage({type:'rec', on:false});
   if (s.display) s.display.getTracks().forEach(t=>t.stop());   // the mic stays open for the next recording
   try{ s.ctx.close(); }catch(_){}
   $('goT').textContent = 'שומר…'; $('go').disabled = true;

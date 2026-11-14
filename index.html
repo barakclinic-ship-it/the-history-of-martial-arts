@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ההיסטוריה של אמנויות הלחימה</title>
 <style>
+#laser{position:absolute;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;z-index:9000;pointer-events:none;
+  background:radial-gradient(circle,#fff 0 12%,#ff1a1a 22% 48%,rgba(255,26,26,.35) 62%,rgba(255,26,26,0) 72%);opacity:0;transition:opacity .25s}
+#laser.on{opacity:1;transition:opacity .05s}
 :root{--ui-bg:rgba(20,20,20,.86);--ui-fg:#f2f2f2;--ui-accent:#c4161c}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:Arial,"Liberation Sans",sans-serif}
@@ -563,7 +566,17 @@ addEventListener('touchend', e=>{ if (tx0==null) return; const dx = e.changedTou
 /* ---------- lesson recording: runs in its own window (recorder.html) ---------- */
 const deckChan = ('BroadcastChannel' in window) ? new BroadcastChannel('kmk-deck') : null;
 function deckSay(){ if (deckChan && cur!=null) deckChan.postMessage({type:'slide', vi:visible.indexOf(cur), title:titleOf(slides[cur])}); }
-if (deckChan) deckChan.onmessage = e=>{ if ((e.data||{}).type==='hello') deckSay(); };
+const recState = {on:false, t0:0, last:0};
+if (deckChan) deckChan.onmessage = e=>{ const m = e.data||{};
+  if (m.type==='hello') deckSay();
+  else if (m.type==='rec'){ Object.assign(recState, {on:!!m.on, t0:m.t0||0, last:Date.now()}); liveRecUI(); } };
+function liveRecUI(){
+  if (!pv || pv.closed) return; const d = pv.document, b = d.getElementById('recB'), t = d.getElementById('recT'); if (!b) return;
+  const on = recState.on && Date.now()-recState.last < 7000;
+  b.classList.toggle('live', on); b.textContent = on ? 'מקליט' : 'הקלט שיעור';
+  b.title = on ? 'ההקלטה פועלת – עוצרים בחלון ההקלטה' : 'פתיחת חלון ההקלטה';
+  t.textContent = on ? fmtT((Date.now()-recState.t0)/1000) : '';
+}
 function openRecorder(W){
   W = W || window;                                    // open from the window that was clicked, so the browser allows it
   const url = new URL('recorder.html', location.href).href;
@@ -679,6 +692,11 @@ function openNotes(){
   #wrap.dragging{cursor:move;user-select:none}
   .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#eee;color:#555;font-size:40px}
   #rec{display:flex;align-items:center;gap:8px}
+  #recB.live{background:#c4161c;color:#fff;animation:recpulse 2.6s ease-in-out infinite}
+  #recB.live::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-inline-end:7px;vertical-align:0}
+  @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
+  #nowF{cursor:crosshair;touch-action:none}
+  #pvDot{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#ff1a1a;box-shadow:0 0 8px 3px rgba(255,30,30,.7);pointer-events:none;display:none;z-index:5}
   #recB.on{background:#c4161c} #recT{font-variant-numeric:tabular-nums;color:#ff6b70;min-width:52px}
   #recB.on::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-inline-end:6px;animation:blink 1s steps(2) infinite}
   @keyframes blink{50%{opacity:.2}}
@@ -697,7 +715,7 @@ function openNotes(){
       <textarea id="ta" placeholder="אין הערות לשקופית הזאת. אפשר לכתוב כאן — נשמר אוטומטית."></textarea></section>
     <div class="gut"></div>
     <section id="viewsP">
-      <div class="cell now"><div class="lbl"><b>מה שהסטודנטים רואים</b></div><div class="box"><div class="frame16" id="nowF"></div></div></div>
+      <div class="cell now"><div class="lbl"><b>מה שהסטודנטים רואים</b> <span style="opacity:.6;font-size:13px">· לחיצה וגרירה = פוינטר אדום על מסך המצגת</span></div><div class="box"><div class="frame16" id="nowF"></div></div></div>
       <div class="gut"></div>
       <div class="cell"><div class="lbl" id="hint"></div><div class="box"><div class="frame16" id="nextF"></div></div></div>
     </section>
@@ -760,9 +778,19 @@ function openNotes(){
   knob.addEventListener('dblclick', ()=>{ lay = {nw:56, nh:64}; applyLay(); lsSet('kmk-pv-layout', JSON.stringify(lay)); });
   knob.addEventListener('keydown', e=>{ const st=2; if (e.key==='ArrowLeft') lay.nw+=st; else if (e.key==='ArrowRight') lay.nw-=st; else if (e.key==='ArrowUp') lay.nh-=st; else if (e.key==='ArrowDown') lay.nh+=st; else return; e.preventDefault(); e.stopPropagation(); lay.nw=Math.max(18,Math.min(82,lay.nw)); lay.nh=Math.max(15,Math.min(85,lay.nh)); applyLay(); lsSet('kmk-pv-layout', JSON.stringify(lay)); });
   applyLay();
-  d.getElementById('recB').onclick = ()=> openRecorder(pv);
+  d.getElementById('recB').onclick = ()=>{ if (recState.on && Date.now()-recState.last < 7000) return; openRecorder(pv); };
+  { const nowF = d.getElementById('nowF'); let down = false;
+    const dot = d.createElement('div'); dot.id = 'pvDot'; nowF.parentElement.appendChild(dot);
+    const at = e=>{ const r = nowF.getBoundingClientRect(); const x = (e.clientX-r.left)/r.width, y = (e.clientY-r.top)/r.height;
+      if (x<0||x>1||y<0||y>1){ laser(null); dot.style.display='none'; return; }
+      dot.style.left = (nowF.offsetLeft + x*r.width)+'px'; dot.style.top = (nowF.offsetTop + y*r.height)+'px'; dot.style.display='block';
+      laser(x*SW, y*SH); };
+    nowF.addEventListener('pointerdown', e=>{ down = true; try{ nowF.setPointerCapture(e.pointerId); }catch(_){} at(e); e.preventDefault(); });
+    nowF.addEventListener('pointermove', e=>{ if (down) at(e); });
+    const up = ()=>{ down = false; laser(null); dot.style.display='none'; };
+    nowF.addEventListener('pointerup', up); nowF.addEventListener('pointercancel', up); nowF.addEventListener('lostpointercapture', up); }
   pv.addEventListener('beforeunload', e=>{ if (rec.active && rec.W===pv){ e.preventDefault(); e.returnValue=''; return; } clearInterval(pvSync); });
-  updateNotes(); recUI();
+  updateNotes(); if (deckChan) deckChan.postMessage({type:'recq'});
   clearInterval(pvSync); pvSync = setInterval(syncPv, 400);
 }
 function posterize(L){
@@ -820,9 +848,18 @@ function updateNotes(){
 }
 function syncPv(){
   if (!pv || pv.closed){ clearInterval(pvSync); return; }
+  liveRecUI();
   const d = pv.document, sec = Math.floor((Date.now()-t0)/1000);
   d.getElementById('el').innerHTML = `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}<small>זמן שיעור</small>`;
   const now = new Date(); d.getElementById('wall').innerHTML = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}<small>שעה</small>`;
+}
+
+/* ---------- laser pointer on the students' screen ---------- */
+let laserEl = null;
+function laser(x, y){
+  if (!laserEl){ laserEl = document.createElement('div'); laserEl.id = 'laser'; stage.appendChild(laserEl); }
+  if (x==null){ laserEl.classList.remove('on'); return; }
+  laserEl.style.left = x+'px'; laserEl.style.top = y+'px'; laserEl.classList.add('on');
 }
 
 /* ---------- grid ---------- */
