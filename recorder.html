@@ -40,7 +40,11 @@ ol{margin:6px 0 0;padding-inline-start:20px}
 .embed .mtr{flex:0 0 56px}
 .embed #micSel{flex:1 1 120px;max-width:190px;font-size:12px;padding:3px 4px}
 .embed button.sm{font-size:12px;padding:3px 6px}
-.embed #micMsg,.embed #msg{flex:1 0 100%;order:9;min-height:0;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.embed #micMsg,.embed #msg{display:none}
+#warn{display:none}
+.embed #warn{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#3a1416;color:#ff4b52;font:700 15px Arial,sans-serif;cursor:help;flex:0 0 auto}
+.embed #warn.ok{background:#14301a;color:#6fdc84}
+.embed #warn[hidden]{display:none}
 .embed #recover{flex:1 0 100%;order:10;padding:2px 6px;font-size:12px}
 .embed #recover .row{display:inline-flex;margin:0!important}
 /* all recording controls are red */
@@ -71,6 +75,7 @@ button.sm.red{background:var(--red);border-color:var(--red);color:#fff;font-weig
     <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
   <div class="ctl"><button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
   <button class="big pz" id="pz" hidden title="השהיה / המשך"><span id="pzT">❚❚ השהה</span></button></div>
+  <span id="warn" hidden></span>
   <div class="ask" id="ask" hidden><span>לעצור את ההקלטה ולשמור?</span><button class="sm red" id="askY">כן, עצור ושמור</button><button class="sm" id="askN">המשך להקליט</button></div>
   <div class="row"><div id="time">0:00</div><div style="flex:1" class="mtr"><div class="lbl cap">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
   <div class="row"><span class="lbl cap">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select><button class="sm" id="micNext" hidden title="עבור למיקרופון הבא ברשימה">הבא</button></div>
@@ -275,6 +280,15 @@ $('pz').onclick = ()=>{ if (!S || S.stopping) return;
   recSay(); };
 addEventListener('beforeunload', e=>{ if (S){ e.preventDefault(); e.returnValue=''; } });
 checkRecover();
+/* inside the presenter there is no room for a text line: show a small icon whose tooltip holds the message */
+if (document.documentElement.classList.contains('embed')){
+  const W = $('warn');
+  const upd = ()=>{ const t = [$('msg').textContent, $('micMsg').textContent].filter(Boolean).join(' · ');
+    W.hidden = !t; W.title = t; const ok = /^נשמר/.test(t); W.classList.toggle('ok', ok); W.textContent = ok ? '✓' : '!'; };
+  new MutationObserver(upd).observe($('msg'), {childList:true, characterData:true, subtree:true});
+  new MutationObserver(upd).observe($('micMsg'), {childList:true, characterData:true, subtree:true});
+  W.onclick = ()=>{ if (W.title) alert(W.title); };
+}
 </script>
 </body>
 </html>
