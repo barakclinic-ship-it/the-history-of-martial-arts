@@ -32,7 +32,8 @@ ol{margin:6px 0 0;padding-inline-start:20px}
 .embed .row{display:contents}
 .embed .big{width:auto;padding:7px 14px;font-size:15px;border-radius:8px;gap:7px}
 .embed .dot{width:10px;height:10px}
-.embed body.rec .big{background:#c4161c;animation:recpulse 2.6s ease-in-out infinite}
+.embed body.rec .big#go{background:#c4161c}
+[hidden]{display:none!important}
 @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
 .embed #time{font-size:18px;min-width:44px;color:#ff6b70}
 .embed body:not(.rec) #time{color:#888}
@@ -42,6 +43,25 @@ ol{margin:6px 0 0;padding-inline-start:20px}
 .embed #micMsg,.embed #msg{flex:1 0 100%;order:9;min-height:0;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
 .embed #recover{flex:1 0 100%;order:10;padding:2px 6px;font-size:12px}
 .embed #recover .row{display:inline-flex;margin:0!important}
+/* all recording controls are red */
+.ctl{display:flex;gap:8px}
+.big.stop{background:var(--red)}
+.big.pz{background:transparent;color:#ff4b52;border:2px solid var(--red);flex:0 0 auto;width:auto;padding-inline:16px}
+body.paused .big.pz{background:var(--red);color:#fff}
+body.paused #time{animation:recpulse 1.2s steps(2) infinite}
+.meter i{background:var(--red)!important}
+.meter{background:#3a1416}
+#time{color:#ff4b52}
+select#micSel,button.sm{border-color:#7a1a1e}
+button.sm.red{background:var(--red);border-color:var(--red);color:#fff;font-weight:700}
+.ask{display:flex;align-items:center;gap:8px;color:#ff6b70;font-weight:700}
+.embed .ctl{display:contents}
+.embed .big.pz{padding:5px 10px}
+.embed body.rec:not(.paused) .big#go{animation:recpulse 2.6s ease-in-out infinite}
+.embed body.rec .big{animation:none}
+.embed .ask{font-size:13px;gap:6px}
+@keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
+.embed body.asking .mtr,.embed body.asking #micSel,.embed body.asking #micNext{display:none}
 </style>
 </head>
 <body>
@@ -49,7 +69,9 @@ ol{margin:6px 0 0;padding-inline-start:20px}
   <h1>הקלטת שיעור</h1>
   <div id="recover" class="box" hidden><b>נמצאה הקלטה שלא נשמרה</b> (<span id="recLen"></span>).
     <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
-  <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
+  <div class="ctl"><button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
+  <button class="big pz" id="pz" hidden title="השהיה / המשך"><span id="pzT">❚❚ השהה</span></button></div>
+  <div class="ask" id="ask" hidden><span>לעצור את ההקלטה ולשמור?</span><button class="sm red" id="askY">כן, עצור ושמור</button><button class="sm" id="askN">המשך להקליט</button></div>
   <div class="row"><div id="time">0:00</div><div style="flex:1" class="mtr"><div class="lbl cap">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
   <div class="row"><span class="lbl cap">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select><button class="sm" id="micNext" hidden title="עבור למיקרופון הבא ברשימה">הבא</button></div>
   <div id="micMsg" class="lbl" style="min-height:20px"></div>
@@ -70,11 +92,12 @@ const PART_MS = 20000;               // close a part file every 20s so a crash l
 let S = null;                        // current session
 const chan = ('BroadcastChannel' in window) ? new BroadcastChannel('kmk-deck') : null;
 let curSlide = null;
-const recSay = ()=>{ if (chan) chan.postMessage({type:'rec', on:!!(S && !S.stopping), t0: S ? S.t0 : 0}); };
-if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='recq') recSay(); if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:(Date.now()-S.t0)/1000, vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
+const recSay = ()=>{ if (chan) chan.postMessage({type:'rec', on:!!(S && !S.stopping), paused:!!(S && S.pauseAt), t0: S ? S.t0 : 0}); };
+if (chan){ chan.onmessage = e => { const m = e.data||{}; if (m.type==='recq') recSay(); if (m.type==='slide'){ curSlide = m; if (S){ const l = S.marks[S.marks.length-1]; if (!l || l.vi!==m.vi) S.marks.push({t:recSec(), vi:m.vi, title:m.title}); } } }; chan.postMessage({type:'hello'}); }
 try{ $('fmt').value = localStorage.getItem('kmk-rec-fmt2') || 'webm'; }catch(_){}
 $('fmt').onchange = ()=>{ try{ localStorage.setItem('kmk-rec-fmt2', $('fmt').value); }catch(_){} };
 
+const recSec = ()=> S ? (Date.now() - S.t0 - (S.pausedMs||0) - (S.pauseAt ? Date.now()-S.pauseAt : 0))/1000 : 0;
 const pad = x => String(x).padStart(2,'0');
 const fmtT = s => { s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60; return (h?h+':':'')+(h?pad(m):m)+':'+pad(x); };
 function pickMime(pref){
@@ -104,7 +127,7 @@ function write(blob){
 async function saveMeta(){
   if (!S.dir) return;
   const fh = await S.dir.getFileHandle('meta.json', {create:true}); const w = await fh.createWritable();
-  await w.write(JSON.stringify({mime:S.mime, t0:S.t0, dur:(Date.now()-S.t0)/1000, parts:S.parts, marks:S.marks})); await w.close();
+  await w.write(JSON.stringify({mime:S.mime, t0:S.t0, dur:recSec(), parts:S.parts, marks:S.marks})); await w.close();
 }
 
 /* ---------- microphone: chosen and tested before recording ---------- */
@@ -192,8 +215,8 @@ async function start2(){
   display.getVideoTracks()[0].addEventListener('ended', stop);
   mr.start(1000);
   if (!da.length) $('msg').textContent = 'לא נבחר שיתוף אודיו – קול הסרטונים לא יוקלט (הקול שלך כן).';
-  document.body.classList.add('rec'); $('go').classList.add('stop'); $('goT').textContent = 'עצור ושמור'; $('fmt').disabled = true;
-  S.tick = setInterval(()=>{ $('time').textContent = fmtT((Date.now()-S.t0)/1000); if (Date.now()-(S.said||0) > 2000){ S.said = Date.now(); recSay(); } }, 500);
+  document.body.classList.add('rec'); $('pz').hidden = false; $('go').classList.add('stop'); $('goT').textContent = 'עצור'; $('fmt').disabled = true;
+  S.tick = setInterval(()=>{ $('time').textContent = fmtT(recSec()); if (Date.now()-(S.said||0) > 2000){ S.said = Date.now(); recSay(); } }, 500);
   recSay();
   if (an){ const buf = new Uint8Array(an.fftSize); const loop = ()=>{ if (!S) return; an.getByteTimeDomainData(buf); let pk=0; for (const v of buf) pk=Math.max(pk,Math.abs(v-128)); $('lvl').style.width = Math.min(100,pk/90*100)+'%'; requestAnimationFrame(loop); }; loop(); }
 }
@@ -209,7 +232,7 @@ async function finish(){
   await saveMeta().catch(()=>{});
   await deliver(s.dir, s.mime, s.parts, s.mem, s.marks, s.t0);
   S = null;
-  document.body.classList.remove('rec'); $('go').classList.remove('stop'); $('goT').textContent = 'התחל הקלטה'; $('go').disabled = false; $('fmt').disabled = false; $('lvl').style.width = '0';
+  document.body.classList.remove('rec','paused'); $('pz').hidden = true; $('ask').hidden = true; $('go').hidden = false; $('pzT').textContent = '❚❚ השהה'; $('go').classList.remove('stop'); $('goT').textContent = 'התחל הקלטה'; $('go').disabled = false; $('fmt').disabled = false; $('lvl').style.width = '0';
 }
 async function deliver(dir, mime, parts, mem, marks, t0){
   const blobs = [];
@@ -243,7 +266,13 @@ async function checkRecover(){
 $('recSave').onclick = async ()=>{ if (!orphan) return; const o = orphan; await deliver(o.dir, o.meta.mime, o.parts, [], o.meta.marks, o.meta.t0); };
 $('recDel').onclick = async ()=>{ if (!orphan) return; const root = await opfs(); try{ await root.removeEntry(orphan.dir.name,{recursive:true}); }catch(_){} checkRecover(); };
 
-$('go').onclick = ()=> S ? stop() : start();
+$('go').onclick = ()=>{ if (!S) return start(); $('ask').hidden = false; $('go').hidden = true; $('pz').hidden = true; document.body.classList.add('asking'); };
+$('askN').onclick = ()=>{ document.body.classList.remove('asking'); $('ask').hidden = true; $('go').hidden = false; $('pz').hidden = !S; };
+$('askY').onclick = ()=>{ document.body.classList.remove('asking'); $('ask').hidden = true; $('go').hidden = false; stop(); };
+$('pz').onclick = ()=>{ if (!S || S.stopping) return;
+  if (S.mr.state==='recording'){ try{ S.mr.pause(); }catch(_){ return; } S.pauseAt = Date.now(); document.body.classList.add('paused'); $('pzT').textContent = '● המשך'; }
+  else if (S.mr.state==='paused'){ try{ S.mr.resume(); }catch(_){ return; } S.pausedMs = (S.pausedMs||0) + Date.now()-S.pauseAt; S.pauseAt = 0; document.body.classList.remove('paused'); $('pzT').textContent = '❚❚ השהה'; }
+  recSay(); };
 addEventListener('beforeunload', e=>{ if (S){ e.preventDefault(); e.returnValue=''; } });
 checkRecover();
 </script>
