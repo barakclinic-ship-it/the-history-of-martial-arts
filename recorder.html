@@ -25,6 +25,23 @@ select,button.sm{background:#2a2a2a;color:var(--fg);border:1px solid #3a3a3a;bor
 #msg{min-height:22px;font-size:14px;color:#ffb3b5}
 #recover[hidden]{display:none}
 ol{margin:6px 0 0;padding-inline-start:20px}
+/* compact strip inside the presenter screen */
+.embed body{background:#000;overflow:hidden}
+.embed main{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:3px 8px;padding:3px 4px;max-width:none;margin:0}
+.embed h1,.embed .howto,.embed .row.fmtrow,.embed .cap{display:none}
+.embed .row{display:contents}
+.embed .big{width:auto;padding:7px 14px;font-size:15px;border-radius:8px;gap:7px}
+.embed .dot{width:10px;height:10px}
+.embed body.rec .big{background:#c4161c;animation:recpulse 2.6s ease-in-out infinite}
+@keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
+.embed #time{font-size:18px;min-width:44px;color:#ff6b70}
+.embed body:not(.rec) #time{color:#888}
+.embed .mtr{flex:0 0 56px}
+.embed #micSel{flex:1 1 120px;max-width:190px;font-size:12px;padding:3px 4px}
+.embed button.sm{font-size:12px;padding:3px 6px}
+.embed #micMsg,.embed #msg{flex:1 0 100%;order:9;min-height:0;font-size:11px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.embed #recover{flex:1 0 100%;order:10;padding:2px 6px;font-size:12px}
+.embed #recover .row{display:inline-flex;margin:0!important}
 </style>
 </head>
 <body>
@@ -33,13 +50,13 @@ ol{margin:6px 0 0;padding-inline-start:20px}
   <div id="recover" class="box" hidden><b>נמצאה הקלטה שלא נשמרה</b> (<span id="recLen"></span>).
     <div class="row" style="margin-top:8px"><button class="sm" id="recSave">שמור אותה</button><button class="sm" id="recDel">מחק</button></div></div>
   <button class="big" id="go"><span class="dot"></span><span id="goT">התחל הקלטה</span></button>
-  <div class="row"><div id="time">0:00</div><div style="flex:1"><div class="lbl">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
-  <div class="row"><span class="lbl">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select><button class="sm" id="micNext" hidden title="עבור למיקרופון הבא ברשימה">הבא</button></div>
+  <div class="row"><div id="time">0:00</div><div style="flex:1" class="mtr"><div class="lbl cap">מיקרופון</div><div class="meter"><i id="lvl"></i></div></div></div>
+  <div class="row"><span class="lbl cap">מיקרופון:</span><select id="micSel" style="flex:1;min-width:0"><option value="">ברירת המחדל</option></select><button class="sm" id="micNext" hidden title="עבור למיקרופון הבא ברשימה">הבא</button></div>
   <div id="micMsg" class="lbl" style="min-height:20px"></div>
-  <div class="row"><span class="lbl">פורמט:</span>
+  <div class="row fmtrow"><span class="lbl">פורמט:</span>
     <select id="fmt"><option value="webm">WebM – יציב (מומלץ)</option><option value="mp4">MP4 – ניסיוני, עלול לקרוס</option></select></div>
   <div id="msg" role="status"></div>
-  <div class="box"><b>איך מקליטים</b><ol>
+  <div class="box howto"><b>איך מקליטים</b><ol>
     <li>מדברים ובודקים שהפס הירוק של המיקרופון זז. אם לא – בוחרים מיקרופון אחר מהרשימה.</li>
     <li>לוחצים "התחל הקלטה".</li>
     <li>בחלון של כרום בוחרים <b>"כל המסך" (Entire screen)</b> ← המסך שמוצגת עליו המצגת לסטודנטים, ומסמנים <b>"שתף גם אודיו מערכת"</b> כדי שקול הסרטונים ייכנס.<br><span class="lbl">לא לבחור "כרטיסייה" – זה מפיל את המצגת.</span></li>
@@ -47,6 +64,7 @@ ol{margin:6px 0 0;padding-inline-start:20px}
   </ol><div class="lbl" style="margin-top:6px">ההקלטה נכתבת לדיסק כל כמה שניות, כך שגם אם משהו קורס – מה שהוקלט נשמר ואפשר לשחזר אותו כאן.</div></div>
 </main>
 <script>
+if (/[?&]embed/.test(location.search)) document.documentElement.classList.add('embed');
 const $ = id => document.getElementById(id);
 const PART_MS = 20000;               // close a part file every 20s so a crash loses at most that much
 let S = null;                        // current session
