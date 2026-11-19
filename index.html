@@ -722,6 +722,9 @@ function openNotes(){
   #recB.live::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-inline-end:7px;vertical-align:0}
   @keyframes recpulse{0%,100%{opacity:1}50%{opacity:.35}}
   #nowF{cursor:crosshair;touch-action:none}
+  .frame16 .el.vplaying{outline:16px solid #00e676;outline-offset:-16px;box-shadow:0 0 60px 10px rgba(0,230,118,.55);z-index:50}
+  .frame16 .el.vplaying::after{content:"▶ מתנגן";position:absolute;top:24px;left:24px;background:#00e676;color:#000;font:700 64px/1.2 Arial,sans-serif;padding:6px 28px;border-radius:14px}
+  .cell.now.vidon .lbl b::after{content:"  ▶ סרטון מתנגן";color:#00e676;font-weight:700}
   #pvDot{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#ff1a1a;box-shadow:0 0 8px 3px rgba(255,30,30,.7);pointer-events:none;display:none;z-index:5}
   #recB.on{background:#c4161c} #recT{font-variant-numeric:tabular-nums;color:#ff6b70;min-width:52px}
   #recB.on::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;background:#fff;margin-inline-end:6px;animation:blink 1s steps(2) infinite}
@@ -875,6 +878,12 @@ function updateNotes(){
 function syncPv(){
   if (!pv || pv.closed){ clearInterval(pvSync); return; }
   liveRecUI();
+  // a video that is playing on the students' screen gets a coloured frame in the preview
+  if (pv._now && layer){
+    const playing = new Set([...layer.querySelectorAll('.el video')].filter(v=>!v.paused && !v.ended).map(v=>v.closest('.el').dataset.id));
+    pv._now.querySelectorAll('.el[data-id]').forEach(el=>{ if (el.querySelector('img.vposter')) el.classList.toggle('vplaying', playing.has(el.dataset.id)); });
+    const nowBox = pv.document.querySelector('.cell.now'); if (nowBox) nowBox.classList.toggle('vidon', playing.size>0);
+  }
   const d = pv.document, sec = Math.floor((Date.now()-t0)/1000);
   d.getElementById('el').innerHTML = `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}<small>זמן שיעור</small>`;
   const now = new Date(); d.getElementById('wall').innerHTML = `${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')}<small>שעה</small>`;
